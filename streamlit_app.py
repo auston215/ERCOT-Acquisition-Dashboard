@@ -728,9 +728,10 @@ def acquisition_value(row):
         row.get("PTC/ITC")
     )
 
-    ec = row[
-        "Energy Community"
-    ] == "Yes"
+    ec = (
+        row["Energy Community"]
+        == "Yes"
+    )
 
     if tax_credit and ec:
         return value_both
@@ -1144,7 +1145,7 @@ st.caption(
     "Owners with at least two ERCOT projects between 50 MW and 60 MW."
 )
 
-# Identify all projects between 50 MW and 60 MW
+# Find all projects between 50 and 60 MW
 bundle_candidates = df[
     df[
         "Capacity (MW)"
@@ -1155,7 +1156,7 @@ bundle_candidates = df[
     )
 ].copy()
 
-# Count qualifying projects by owner
+# Build bundle summary
 bundle_summary = (
     bundle_candidates
     .groupby(
@@ -1185,24 +1186,35 @@ bundle_summary = (
     )
 )
 
-# Only owners with at least 2 projects
+# Only owners with 2+ qualifying projects
 bundle_summary = bundle_summary[
     bundle_summary[
         "Bundle_Projects"
     ] >= 2
 ].copy()
 
+# ------------------------------------------------------------
+# RANK BUNDLES BY AVERAGE SCORE
+# ------------------------------------------------------------
+
 bundle_summary = bundle_summary.sort_values(
     by=[
-        "Bundle_Projects",
-        "Bundle_MW",
-        "Best_Score"
+        "Average_Score",
+        "Best_Score",
+        "Bundle_MW"
     ],
     ascending=[
         False,
         False,
         False
     ]
+).reset_index(drop=True)
+
+# Add bundle ranking
+bundle_summary.insert(
+    0,
+    "Bundle Rank",
+    np.arange(len(bundle_summary)) + 1
 )
 
 if bundle_summary.empty:
@@ -1235,7 +1247,10 @@ else:
         f"{bundle_summary['Bundle_MW'].sum():,.0f} MW"
     )
 
-    # Summary table
+    # --------------------------------------------------------
+    # BUNDLE SUMMARY
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Bundle Summary"
     )
@@ -1260,9 +1275,16 @@ else:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Average Score":
+            "Bundle Rank":
                 st.column_config.NumberColumn(
+                    "Rank"
+                ),
+
+            "Average Score":
+                st.column_config.ProgressColumn(
                     "Average Score",
+                    min_value=0,
+                    max_value=100,
                     format="%.1f"
                 ),
 
@@ -1283,7 +1305,7 @@ else:
     )
 
     # --------------------------------------------------------
-    # INDIVIDUAL OWNER BUNDLES
+    # PROJECTS WITHIN EACH BUNDLE
     # --------------------------------------------------------
 
     st.markdown(
@@ -1295,6 +1317,12 @@ else:
         bundle_owner = bundle[
             "Owner"
         ]
+
+        bundle_rank = int(
+            bundle[
+                "Bundle Rank"
+            ]
+        )
 
         owner_projects = (
             bundle_candidates[
@@ -1318,10 +1346,15 @@ else:
             "Bundle_MW"
         ]
 
+        bundle_avg = bundle[
+            "Average_Score"
+        ]
+
         with st.expander(
-            f"📦 {bundle_owner} — "
+            f"#{bundle_rank} 📦 {bundle_owner} — "
             f"{bundle_count} projects | "
-            f"{bundle_mw:,.0f} MW"
+            f"{bundle_mw:,.1f} MW | "
+            f"Avg Score {bundle_avg:.1f}"
         ):
 
             bundle_columns = [
