@@ -38,7 +38,7 @@ def owner_key(value):
 
 
 # ------------------------------------------------------------
-# SIDEBAR — UPLOAD
+# SIDEBAR — DATA
 # ------------------------------------------------------------
 
 st.sidebar.header("1. Data")
@@ -124,6 +124,10 @@ else:
 st.sidebar.divider()
 st.sidebar.header("3. Scoring Inputs")
 
+# -----------------------------
+# SELLER DISTRESS
+# -----------------------------
+
 with st.sidebar.expander("Seller Distress Points"):
 
     distress_5 = st.number_input(
@@ -184,6 +188,10 @@ with st.sidebar.expander("Seller Distress Points"):
     )
 
 
+# -----------------------------
+# ASSET QUALITY
+# -----------------------------
+
 with st.sidebar.expander("Asset Quality Points"):
 
     asset_operating = st.number_input(
@@ -241,6 +249,10 @@ with st.sidebar.expander("Asset Quality Points"):
     )
 
 
+# -----------------------------
+# MARKET / REVENUE
+# -----------------------------
+
 with st.sidebar.expander("Market / Revenue Points"):
 
     market_both = st.number_input(
@@ -268,6 +280,10 @@ with st.sidebar.expander("Market / Revenue Points"):
     )
 
 
+# -----------------------------
+# ACQUISITION VALUE
+# -----------------------------
+
 with st.sidebar.expander("Acquisition Value Points"):
 
     value_both = st.number_input(
@@ -294,6 +310,10 @@ with st.sidebar.expander("Acquisition Value Points"):
         key="value_none"
     )
 
+
+# -----------------------------
+# TIMING
+# -----------------------------
 
 with st.sidebar.expander("Timing Points"):
 
@@ -333,6 +353,10 @@ with st.sidebar.expander("Timing Points"):
         key="timing_missing"
     )
 
+
+# -----------------------------
+# EXECUTABILITY
+# -----------------------------
 
 with st.sidebar.expander("Executability Mix"):
 
@@ -394,7 +418,9 @@ if uploaded_file is None:
         "Upload your latest Orennia Power Projects CSV using the sidebar."
     )
 
-    st.subheader("Seller Distress Assumptions")
+    st.subheader(
+        "Seller Distress / Actionability Assumptions"
+    )
 
     st.dataframe(
         seller_signals,
@@ -439,7 +465,10 @@ if missing_columns:
 # CLEAN DATA
 # ------------------------------------------------------------
 
-df["Owner"] = df["Owner"].fillna("")
+df["Owner"] = (
+    df["Owner"]
+    .fillna("")
+)
 
 df["First Power Date"] = pd.to_datetime(
     df["First Power Date"],
@@ -452,10 +481,11 @@ df["Capacity (MW)"] = pd.to_numeric(
 )
 
 # ------------------------------------------------------------
-# TECHNOLOGY FILTER
-# Solar = all stages
+# TECHNOLOGY UNIVERSE
+#
+# Solar   = all stages
 # Storage = all stages
-# Wind = Operating only
+# Wind    = Operating only
 # ------------------------------------------------------------
 
 df = df[
@@ -587,7 +617,9 @@ confidence_points = {
 
 def distress_score(row):
 
-    discount = row["Discount Potential"]
+    discount = row[
+        "Discount Potential"
+    ]
 
     if pd.isna(discount):
         return distress_none
@@ -597,7 +629,9 @@ def distress_score(row):
         distress_none
     )
 
-    confidence = row["Seller Confidence"]
+    confidence = row[
+        "Seller Confidence"
+    ]
 
     multiplier = confidence_points.get(
         confidence,
@@ -619,11 +653,15 @@ df["Distress Score"] = df.apply(
 def asset_score(row):
 
     status = clean_text(
-        row.get("Power Project Status")
+        row.get(
+            "Power Project Status"
+        )
     )
 
     detailed = clean_text(
-        row.get("Detailed Status")
+        row.get(
+            "Detailed Status"
+        )
     )
 
     if (
@@ -675,11 +713,15 @@ df["Asset Quality"] = df.apply(
 def market_score(row):
 
     contract = has_value(
-        row.get("Contract Type")
+        row.get(
+            "Contract Type"
+        )
     )
 
     offtaker = has_value(
-        row.get("Contract Offtaker")
+        row.get(
+            "Contract Offtaker"
+        )
     )
 
     if contract and offtaker:
@@ -744,7 +786,9 @@ df["Energy Community"] = df.apply(
 def acquisition_value(row):
 
     tax_credit = has_value(
-        row.get("PTC/ITC")
+        row.get(
+            "PTC/ITC"
+        )
     )
 
     ec = (
@@ -841,7 +885,7 @@ df["Actionability Score"] = (
 )
 
 # ------------------------------------------------------------
-# EXECUTABILITY
+# EXECUTABILITY SCORE
 # ------------------------------------------------------------
 
 df["Executability"] = (
@@ -874,22 +918,30 @@ def completeness(row):
         score += 15
 
     if not pd.isna(
-        row.get("First Power Date")
+        row.get(
+            "First Power Date"
+        )
     ):
         score += 15
 
     if (
         has_value(
-            row.get("Contract Type")
+            row.get(
+                "Contract Type"
+            )
         )
         or has_value(
-            row.get("Contract Offtaker")
+            row.get(
+                "Contract Offtaker"
+            )
         )
     ):
         score += 15
 
     if has_value(
-        row.get("PTC/ITC")
+        row.get(
+            "PTC/ITC"
+        )
     ):
         score += 15
 
@@ -934,7 +986,9 @@ df["Opportunity Score"] = (
 def action(row):
 
     if pd.isna(
-        row["Discount Potential"]
+        row[
+            "Discount Potential"
+        ]
     ):
         return "RESEARCH / MONITOR"
 
@@ -960,29 +1014,36 @@ df["Action"] = df.apply(
 )
 
 # ------------------------------------------------------------
-# RANK
+# OVERALL PROJECT RANK
 # ------------------------------------------------------------
 
-df = df.sort_values(
-    by=[
-        "Opportunity Score",
-        "Data Completeness",
-        "Capacity (MW)"
-    ],
-    ascending=[
-        False,
-        False,
-        False
-    ]
-).reset_index(drop=True)
-
-df["Rank"] = (
-    np.arange(len(df)) + 1
+df = (
+    df.sort_values(
+        by=[
+            "Opportunity Score",
+            "Data Completeness",
+            "Capacity (MW)"
+        ],
+        ascending=[
+            False,
+            False,
+            False
+        ]
+    )
+    .reset_index(
+        drop=True
+    )
 )
 
-# ------------------------------------------------------------
+df["Rank"] = (
+    np.arange(
+        len(df)
+    ) + 1
+)
+
+# ============================================================
 # DASHBOARD KPIs
-# ------------------------------------------------------------
+# ============================================================
 
 st.divider()
 
@@ -1013,9 +1074,9 @@ c4.metric(
     f"{df['Opportunity Score'].max():.1f}"
 )
 
-# ------------------------------------------------------------
-# FILTERS
-# ------------------------------------------------------------
+# ============================================================
+# GLOBAL FILTERS
+# ============================================================
 
 st.subheader("Filters")
 
@@ -1038,9 +1099,8 @@ selected_technology = f1.multiselect(
 owner_options = sorted(
     [
         owner
-        for owner in df[
-            "Owner"
-        ].unique()
+        for owner
+        in df["Owner"].unique()
         if clean_text(owner)
     ]
 )
@@ -1090,12 +1150,16 @@ if selected_owners:
         )
     ]
 
-# ------------------------------------------------------------
-# TOP TARGETS
-# ------------------------------------------------------------
+# ============================================================
+# TOP ACQUISITION TARGETS — OVERALL
+# ============================================================
 
 st.subheader(
     "🏆 Top Acquisition Targets"
+)
+
+st.caption(
+    "Top 20 projects across all included technologies based on Opportunity Score."
 )
 
 display_columns = [
@@ -1135,6 +1199,7 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     column_config={
+
         "Opportunity Score":
             st.column_config.ProgressColumn(
                 "Opportunity Score",
@@ -1151,7 +1216,154 @@ st.dataframe(
 )
 
 # ============================================================
-# BUNDLE SECTION
+# TOP PROJECTS BY TECHNOLOGY
+# ============================================================
+
+st.divider()
+
+st.subheader(
+    "⚡ Top Projects by Technology"
+)
+
+st.caption(
+    "Select Solar, Storage, or Wind to view the Top 20 projects "
+    "within that technology."
+)
+
+tech_options = sorted(
+    df[
+        "Power Project Type"
+    ]
+    .dropna()
+    .unique()
+)
+
+selected_tech_rank = st.selectbox(
+    "Select Technology",
+    tech_options,
+    key="technology_ranking"
+)
+
+# Filter to the selected technology
+technology_ranked = df[
+    df[
+        "Power Project Type"
+    ] == selected_tech_rank
+].copy()
+
+# Sort within technology
+technology_ranked = (
+    technology_ranked
+    .sort_values(
+        by=[
+            "Opportunity Score",
+            "Data Completeness",
+            "Capacity (MW)"
+        ],
+        ascending=[
+            False,
+            False,
+            False
+        ]
+    )
+    .reset_index(
+        drop=True
+    )
+)
+
+# Create technology-specific rank
+technology_ranked[
+    "Technology Rank"
+] = (
+    np.arange(
+        len(
+            technology_ranked
+        )
+    ) + 1
+)
+
+# Keep only Top 20
+technology_top_20 = (
+    technology_ranked
+    .head(20)
+)
+
+tech_columns = [
+    "Technology Rank",
+    "Power Project Name",
+    "Owner",
+    "Capacity (MW)",
+    "Power Project Status",
+    "First Power Date",
+    "Contract Type",
+    "Contract Offtaker",
+    "Distress Score",
+    "Asset Quality",
+    "Market / Revenue",
+    "Acquisition Value",
+    "Executability",
+    "Opportunity Score",
+    "Action",
+]
+
+tech_columns = [
+    col
+    for col in tech_columns
+    if col in technology_top_20.columns
+]
+
+# Technology KPIs
+t1, t2, t3 = st.columns(3)
+
+t1.metric(
+    f"{selected_tech_rank} Projects",
+    len(
+        technology_ranked
+    )
+)
+
+t2.metric(
+    f"{selected_tech_rank} Capacity",
+    f"{technology_ranked['Capacity (MW)'].sum():,.0f} MW"
+)
+
+if len(technology_ranked) > 0:
+
+    t3.metric(
+        "Top Technology Score",
+        f"{technology_ranked['Opportunity Score'].max():.1f}"
+    )
+
+st.dataframe(
+    technology_top_20[
+        tech_columns
+    ],
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+
+        "Technology Rank":
+            st.column_config.NumberColumn(
+                "Rank"
+            ),
+
+        "First Power Date":
+            st.column_config.DateColumn(
+                "COD"
+            ),
+
+        "Opportunity Score":
+            st.column_config.ProgressColumn(
+                "Opportunity Score",
+                min_value=0,
+                max_value=100,
+                format="%.1f"
+            ),
+    }
+)
+
+# ============================================================
+# BUNDLE OPPORTUNITIES
 # ============================================================
 
 st.divider()
@@ -1161,7 +1373,8 @@ st.subheader(
 )
 
 st.caption(
-    "Owners with at least two ERCOT projects between 50 MW and 60 MW."
+    "Owners with at least two ERCOT projects between 50 MW and 60 MW. "
+    "Bundles are ranked by average Opportunity Score."
 )
 
 # ------------------------------------------------------------
@@ -1189,6 +1402,7 @@ bundle_summary = (
         as_index=False
     )
     .agg(
+
         Bundle_Projects=(
             "Power Project Name",
             "count"
@@ -1211,7 +1425,7 @@ bundle_summary = (
     )
 )
 
-# Only owners with at least 2 qualifying projects
+# Only owners with at least two qualifying projects
 bundle_summary = bundle_summary[
     bundle_summary[
         "Bundle_Projects"
@@ -1265,7 +1479,9 @@ else:
 
     b1.metric(
         "Potential Bundles",
-        len(bundle_summary)
+        len(
+            bundle_summary
+        )
     )
 
     b2.metric(
@@ -1283,7 +1499,7 @@ else:
     )
 
     # --------------------------------------------------------
-    # BUNDLE SUMMARY
+    # BUNDLE SUMMARY TABLE
     # --------------------------------------------------------
 
     st.markdown(
@@ -1291,8 +1507,10 @@ else:
     )
 
     bundle_summary_display = (
-        bundle_summary.rename(
+        bundle_summary
+        .rename(
             columns={
+
                 "Bundle_Projects":
                     "Projects",
 
@@ -1417,10 +1635,8 @@ else:
 
             bundle_columns = [
                 col
-                for col
-                in bundle_columns
-                if col
-                in owner_projects.columns
+                for col in bundle_columns
+                if col in owner_projects.columns
             ]
 
             st.dataframe(
@@ -1446,9 +1662,9 @@ else:
                 }
             )
 
-# ------------------------------------------------------------
+# ============================================================
 # SCORE BREAKDOWN
-# ------------------------------------------------------------
+# ============================================================
 
 st.divider()
 
@@ -1479,7 +1695,7 @@ if len(filtered) > 0:
     )
 
     s2.metric(
-        "Asset",
+        "Asset Quality",
         f"{project['Asset Quality']:.1f}"
     )
 
@@ -1503,9 +1719,9 @@ if len(filtered) > 0:
         f"{project['Opportunity Score']:.2f}"
     )
 
-# ------------------------------------------------------------
+# ============================================================
 # OWNER OPPORTUNITY SUMMARY
-# ------------------------------------------------------------
+# ============================================================
 
 st.divider()
 
@@ -1519,6 +1735,7 @@ owner_summary = (
         as_index=False
     )
     .agg(
+
         Projects=(
             "Power Project Name",
             "count"
@@ -1544,27 +1761,65 @@ owner_summary = (
 owner_summary = (
     owner_summary
     .sort_values(
-        "Best_Score",
-        ascending=False
+        by=[
+            "Best_Score",
+            "Average_Score"
+        ],
+        ascending=[
+            False,
+            False
+        ]
+    )
+)
+
+owner_summary_display = (
+    owner_summary
+    .rename(
+        columns={
+            "Average_Score":
+                "Average Score",
+
+            "Best_Score":
+                "Best Score",
+        }
     )
 )
 
 st.dataframe(
-    owner_summary.head(25),
+    owner_summary_display.head(25),
     use_container_width=True,
-    hide_index=True
+    hide_index=True,
+    column_config={
+
+        "Average Score":
+            st.column_config.NumberColumn(
+                "Average Score",
+                format="%.1f"
+            ),
+
+        "Best Score":
+            st.column_config.ProgressColumn(
+                "Best Score",
+                min_value=0,
+                max_value=100,
+                format="%.1f"
+            ),
+    }
 )
 
-# ------------------------------------------------------------
+# ============================================================
 # DOWNLOAD
-# ------------------------------------------------------------
+# ============================================================
 
 st.divider()
 
-csv = df.to_csv(
-    index=False
-).encode(
-    "utf-8"
+csv = (
+    df.to_csv(
+        index=False
+    )
+    .encode(
+        "utf-8"
+    )
 )
 
 st.download_button(
