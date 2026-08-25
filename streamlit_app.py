@@ -15,7 +15,8 @@ st.set_page_config(
 
 st.title("⚡ ERCOT Acquisition Dashboard")
 st.caption(
-    "Distressed M&A screening tool for ERCOT solar and battery storage projects"
+    "Distressed M&A screening tool for ERCOT solar, battery storage, "
+    "and operating wind projects"
 )
 
 # ------------------------------------------------------------
@@ -426,10 +427,12 @@ missing_columns = [
 ]
 
 if missing_columns:
+
     st.error(
         "The uploaded file is missing these required columns: "
         + ", ".join(missing_columns)
     )
+
     st.stop()
 
 # ------------------------------------------------------------
@@ -448,10 +451,24 @@ df["Capacity (MW)"] = pd.to_numeric(
     errors="coerce"
 )
 
-# Solar + Storage only
+# ------------------------------------------------------------
+# TECHNOLOGY FILTER
+# Solar = all stages
+# Storage = all stages
+# Wind = Operating only
+# ------------------------------------------------------------
+
 df = df[
-    df["Power Project Type"].isin(
-        ["Solar", "Storage"]
+    (
+        df["Power Project Type"].isin(
+            ["Solar", "Storage"]
+        )
+    )
+    |
+    (
+        (df["Power Project Type"] == "Wind")
+        &
+        (df["Power Project Status"] == "Operating")
     )
 ].copy()
 
@@ -490,7 +507,9 @@ df = df[
 # SELLER ASSUMPTIONS — EDITABLE
 # ------------------------------------------------------------
 
-st.subheader("Seller Distress / Actionability Assumptions")
+st.subheader(
+    "Seller Distress / Actionability Assumptions"
+)
 
 edited_sellers = st.data_editor(
     seller_signals,
@@ -1145,7 +1164,10 @@ st.caption(
     "Owners with at least two ERCOT projects between 50 MW and 60 MW."
 )
 
-# Find all projects between 50 and 60 MW
+# ------------------------------------------------------------
+# IDENTIFY 50–60 MW PROJECTS
+# ------------------------------------------------------------
+
 bundle_candidates = df[
     df[
         "Capacity (MW)"
@@ -1156,7 +1178,10 @@ bundle_candidates = df[
     )
 ].copy()
 
-# Build bundle summary
+# ------------------------------------------------------------
+# BUILD BUNDLE SUMMARY
+# ------------------------------------------------------------
+
 bundle_summary = (
     bundle_candidates
     .groupby(
@@ -1186,7 +1211,7 @@ bundle_summary = (
     )
 )
 
-# Only owners with 2+ qualifying projects
+# Only owners with at least 2 qualifying projects
 bundle_summary = bundle_summary[
     bundle_summary[
         "Bundle_Projects"
@@ -1197,24 +1222,31 @@ bundle_summary = bundle_summary[
 # RANK BUNDLES BY AVERAGE SCORE
 # ------------------------------------------------------------
 
-bundle_summary = bundle_summary.sort_values(
-    by=[
-        "Average_Score",
-        "Best_Score",
-        "Bundle_MW"
-    ],
-    ascending=[
-        False,
-        False,
-        False
-    ]
-).reset_index(drop=True)
+bundle_summary = (
+    bundle_summary
+    .sort_values(
+        by=[
+            "Average_Score",
+            "Best_Score",
+            "Bundle_MW"
+        ],
+        ascending=[
+            False,
+            False,
+            False
+        ]
+    )
+    .reset_index(
+        drop=True
+    )
+)
 
-# Add bundle ranking
 bundle_summary.insert(
     0,
     "Bundle Rank",
-    np.arange(len(bundle_summary)) + 1
+    np.arange(
+        len(bundle_summary)
+    ) + 1
 )
 
 if bundle_summary.empty:
@@ -1225,7 +1257,10 @@ if bundle_summary.empty:
 
 else:
 
-    # Bundle KPIs
+    # --------------------------------------------------------
+    # BUNDLE KPIs
+    # --------------------------------------------------------
+
     b1, b2, b3 = st.columns(3)
 
     b1.metric(
@@ -1260,10 +1295,13 @@ else:
             columns={
                 "Bundle_Projects":
                     "Projects",
+
                 "Bundle_MW":
                     "Total MW",
+
                 "Average_Score":
                     "Average Score",
+
                 "Best_Score":
                     "Best Score",
             }
@@ -1275,6 +1313,7 @@ else:
         use_container_width=True,
         hide_index=True,
         column_config={
+
             "Bundle Rank":
                 st.column_config.NumberColumn(
                     "Rank"
@@ -1324,18 +1363,6 @@ else:
             ]
         )
 
-        owner_projects = (
-            bundle_candidates[
-                bundle_candidates[
-                    "Owner"
-                ] == bundle_owner
-            ]
-            .sort_values(
-                "Opportunity Score",
-                ascending=False
-            )
-        )
-
         bundle_count = int(
             bundle[
                 "Bundle_Projects"
@@ -1349,6 +1376,19 @@ else:
         bundle_avg = bundle[
             "Average_Score"
         ]
+
+        owner_projects = (
+            bundle_candidates[
+                bundle_candidates[
+                    "Owner"
+                ]
+                == bundle_owner
+            ]
+            .sort_values(
+                "Opportunity Score",
+                ascending=False
+            )
+        )
 
         with st.expander(
             f"#{bundle_rank} 📦 {bundle_owner} — "
@@ -1377,8 +1417,10 @@ else:
 
             bundle_columns = [
                 col
-                for col in bundle_columns
-                if col in owner_projects.columns
+                for col
+                in bundle_columns
+                if col
+                in owner_projects.columns
             ]
 
             st.dataframe(
@@ -1388,6 +1430,7 @@ else:
                 use_container_width=True,
                 hide_index=True,
                 column_config={
+
                     "First Power Date":
                         st.column_config.DateColumn(
                             "COD"
@@ -1428,9 +1471,7 @@ if len(filtered) > 0:
         ] == selected_project
     ].iloc[0]
 
-    s1, s2, s3, s4, s5 = (
-        st.columns(5)
-    )
+    s1, s2, s3, s4, s5 = st.columns(5)
 
     s1.metric(
         "Distress",
@@ -1463,7 +1504,7 @@ if len(filtered) > 0:
     )
 
 # ------------------------------------------------------------
-# OWNER OPPORTUNITY VIEW
+# OWNER OPPORTUNITY SUMMARY
 # ------------------------------------------------------------
 
 st.divider()
