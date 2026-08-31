@@ -111,17 +111,12 @@ total_weight = (
 )
 
 if abs(total_weight - 1.0) > 0.001:
-
     st.sidebar.error(
         f"Weights currently total {total_weight:.0%}. "
         "They should total 100%."
     )
-
 else:
-
-    st.sidebar.success(
-        "Weights = 100%"
-    )
+    st.sidebar.success("Weights = 100%")
 
 # ============================================================
 # SIDEBAR — SCORING INPUTS
@@ -134,9 +129,7 @@ st.sidebar.header("3. Scoring Inputs")
 # SELLER MOTIVATION
 # ------------------------------------------------------------
 
-with st.sidebar.expander(
-    "Seller Motivation Points"
-):
+with st.sidebar.expander("Seller Motivation Points"):
 
     distress_5 = st.number_input(
         "Discount Potential 5",
@@ -199,9 +192,7 @@ with st.sidebar.expander(
 # ASSET QUALITY
 # ------------------------------------------------------------
 
-with st.sidebar.expander(
-    "Asset Quality Points"
-):
+with st.sidebar.expander("Asset Quality Points"):
 
     asset_operating = st.number_input(
         "Operating",
@@ -261,9 +252,7 @@ with st.sidebar.expander(
 # MARKET / REVENUE
 # ------------------------------------------------------------
 
-with st.sidebar.expander(
-    "Market / Revenue Points"
-):
+with st.sidebar.expander("Market / Revenue Points"):
 
     market_both = st.number_input(
         "Contract + Named Offtaker",
@@ -293,9 +282,7 @@ with st.sidebar.expander(
 # ACQUISITION VALUE
 # ------------------------------------------------------------
 
-with st.sidebar.expander(
-    "Acquisition Value Points"
-):
+with st.sidebar.expander("Acquisition Value Points"):
 
     value_both = st.number_input(
         "Tax Credit + Energy Community",
@@ -325,9 +312,7 @@ with st.sidebar.expander(
 # TIMING
 # ------------------------------------------------------------
 
-with st.sidebar.expander(
-    "Timing Points"
-):
+with st.sidebar.expander("Timing Points"):
 
     timing_operating = st.number_input(
         "COD Reached / Passed",
@@ -369,9 +354,7 @@ with st.sidebar.expander(
 # EXECUTABILITY
 # ------------------------------------------------------------
 
-with st.sidebar.expander(
-    "Executability Mix"
-):
+with st.sidebar.expander("Executability Mix"):
 
     actionability_weight = st.number_input(
         "Seller Actionability %",
@@ -395,20 +378,86 @@ with st.sidebar.expander(
     )
 
 # ============================================================
+# SELLER SCORE MAPPINGS
+# ============================================================
+
+discount_score_map = {
+    5: distress_5,
+    4: distress_4,
+    3: distress_3,
+    2: distress_2,
+    1: distress_1,
+}
+
+confidence_score_map = {
+    "High": confidence_high,
+    "Medium": confidence_medium,
+    "Low": confidence_low,
+}
+
+actionability_points = {
+    5: 100,
+    4: 80,
+    3: 60,
+    2: 40,
+    1: 20,
+}
+
+
+def calculate_discount_score(potential, confidence):
+
+    if pd.isna(potential):
+        return distress_none
+
+    try:
+        potential = int(potential)
+    except:
+        return distress_none
+
+    base_score = discount_score_map.get(
+        potential,
+        distress_none
+    )
+
+    confidence_multiplier = confidence_score_map.get(
+        clean_text(confidence),
+        confidence_low
+    )
+
+    return round(
+        base_score * confidence_multiplier,
+        1
+    )
+
+
+def actionability_score(value):
+
+    if pd.isna(value):
+        return 50
+
+    try:
+        value = int(value)
+    except:
+        return 50
+
+    return actionability_points.get(
+        value,
+        50
+    )
+
+# ============================================================
 # QUICK DASHBOARD GUIDE
 # ============================================================
 
 st.markdown("## 📘 Dashboard Guide")
 
 guide_left, guide_right = st.columns(
-    [1.4, 1]
+    [1.45, 1]
 )
 
 with guide_left:
 
-    st.markdown(
-        "### 🎯 Opportunity Score"
-    )
+    st.markdown("### 🎯 Opportunity Score")
 
     st.caption(
         "Projects are scored from 0–100 to prioritize attractive "
@@ -424,7 +473,6 @@ with guide_left:
                 "Acquisition Value",
                 "Executability",
             ],
-
             "Weight": [
                 f"{distress_weight:.0%}",
                 f"{asset_weight:.0%}",
@@ -432,7 +480,6 @@ with guide_left:
                 f"{value_weight:.0%}",
                 f"{exec_weight:.0%}",
             ],
-
             "What It Means": [
                 "Likelihood owner is motivated to transact",
                 "Project maturity / operating status",
@@ -449,19 +496,104 @@ with guide_left:
         hide_index=True
     )
 
+    # --------------------------------------------------------
+    # FULL FORMULA
+    # --------------------------------------------------------
+
+    st.markdown("#### Full Formula")
+
+    st.markdown(
+        f"""
+        **Opportunity Score =**  
+        Seller Motivation × **{distress_weight:.0%}**  
+        + Asset Quality × **{asset_weight:.0%}**  
+        + Market / Revenue × **{market_weight:.0%}**  
+        + Acquisition Value × **{value_weight:.0%}**  
+        + Executability × **{exec_weight:.0%}**
+        """
+    )
+
     st.caption(
-        "Seller Motivation starts with Discount Potential: "
-        "5 = Very High, 4 = High, 3 = Moderate, 2 = Low, 1 = Very Low. "
-        "These convert to scores of 100 / 80 / 60 / 40 / 20, "
-        "are adjusted for confidence, and then receive the Seller "
-        "Motivation weighting in the final Opportunity Score."
+        "Seller Motivation = Discount Potential score × Confidence. "
+        "Discount Potential 5 / 4 / 3 / 2 / 1 maps to "
+        "100 / 80 / 60 / 40 / 20."
+    )
+
+    st.caption(
+        f"Executability = Seller Actionability × "
+        f"{actionability_weight:.0%} + Timing × "
+        f"{timing_exec_weight:.0%} + Asset Quality × "
+        f"{asset_exec_weight:.0%}."
+    )
+
+    # --------------------------------------------------------
+    # WORKED EXAMPLE
+    # --------------------------------------------------------
+
+    example_seller = (
+        distress_4
+        * confidence_high
+    )
+
+    example_asset = asset_operating
+    example_market = market_both
+    example_value = value_tax
+
+    example_actionability = 100
+    example_timing = timing_operating
+
+    example_executability = (
+        example_actionability
+        * actionability_weight
+        +
+        example_timing
+        * timing_exec_weight
+        +
+        example_asset
+        * asset_exec_weight
+    )
+
+    example_final = (
+        example_seller
+        * distress_weight
+        +
+        example_asset
+        * asset_weight
+        +
+        example_market
+        * market_weight
+        +
+        example_value
+        * value_weight
+        +
+        example_executability
+        * exec_weight
+    )
+
+    st.markdown("#### Example")
+
+    st.caption(
+        f"Discount Potential 4 + High Confidence = "
+        f"{distress_4:.0f} Seller Motivation. "
+        f"Operating Asset = {example_asset:.0f}; "
+        f"Contract + Offtaker = {example_market:.0f}; "
+        f"Tax Credit = {example_value:.0f}; "
+        f"Executability = {example_executability:.0f}."
+    )
+
+    st.success(
+        f"Example Opportunity Score = "
+        f"({example_seller:.0f} × {distress_weight:.0%}) + "
+        f"({example_asset:.0f} × {asset_weight:.0%}) + "
+        f"({example_market:.0f} × {market_weight:.0%}) + "
+        f"({example_value:.0f} × {value_weight:.0%}) + "
+        f"({example_executability:.0f} × {exec_weight:.0%}) "
+        f"= {example_final:.1f}"
     )
 
 with guide_right:
 
-    st.markdown(
-        "### 🧭 How to Use"
-    )
+    st.markdown("### 🧭 How to Use")
 
     st.markdown(
         """
@@ -473,9 +605,7 @@ with guide_right:
         """
     )
 
-    st.markdown(
-        "### 🚦 Score Guide"
-    )
+    st.markdown("### 🚦 Score Guide")
 
     st.markdown(
         """
@@ -512,7 +642,6 @@ seller_signals = pd.DataFrame(
         ["EDF Renewables", 1, 1, "High"],
         ["Greenbacker Renewable Energy Company", 1, 1, "High"],
     ],
-
     columns=[
         "Owner",
         "Discount Potential",
@@ -520,91 +649,6 @@ seller_signals = pd.DataFrame(
         "Confidence"
     ]
 )
-
-# ============================================================
-# SELLER SCORE MAPPINGS
-# ============================================================
-
-discount_score_map = {
-    5: distress_5,
-    4: distress_4,
-    3: distress_3,
-    2: distress_2,
-    1: distress_1,
-}
-
-confidence_score_map = {
-    "High": confidence_high,
-    "Medium": confidence_medium,
-    "Low": confidence_low,
-}
-
-actionability_points = {
-    5: 100,
-    4: 80,
-    3: 60,
-    2: 40,
-    1: 20,
-}
-
-
-def calculate_discount_score(
-    potential,
-    confidence
-):
-
-    if pd.isna(
-        potential
-    ):
-        return distress_none
-
-    try:
-        potential = int(
-            potential
-        )
-    except:
-        return distress_none
-
-    base_score = discount_score_map.get(
-        potential,
-        distress_none
-    )
-
-    confidence_multiplier = (
-        confidence_score_map.get(
-            clean_text(
-                confidence
-            ),
-            confidence_low
-        )
-    )
-
-    return round(
-        base_score
-        * confidence_multiplier,
-        1
-    )
-
-
-def actionability_score(value):
-
-    if pd.isna(
-        value
-    ):
-        return 50
-
-    try:
-        value = int(
-            value
-        )
-    except:
-        return 50
-
-    return actionability_points.get(
-        value,
-        50
-    )
-
 
 # ============================================================
 # INITIALIZE SELLER ASSUMPTIONS
@@ -638,12 +682,8 @@ if uploaded_file is None:
         "Discount Score",
         seller_preview.apply(
             lambda row: calculate_discount_score(
-                row[
-                    "Discount Potential"
-                ],
-                row[
-                    "Confidence"
-                ]
+                row["Discount Potential"],
+                row["Confidence"]
             ),
             axis=1
         )
@@ -759,9 +799,7 @@ df = df[
 # ============================================================
 
 df = df[
-    ~df[
-        "Owner"
-    ].str.contains(
+    ~df["Owner"].str.contains(
         "Pine Gate",
         case=False,
         na=False
@@ -798,8 +836,8 @@ st.subheader(
 
 st.caption(
     "The 1–5 inputs are qualitative assumptions. "
-    "The adjacent 0–100 scores show how those assumptions "
-    "are translated into the scoring model."
+    "The adjacent 0–100 scores show how they translate "
+    "into the scoring model."
 )
 
 current_sellers = (
@@ -809,7 +847,7 @@ current_sellers = (
 )
 
 # ------------------------------------------------------------
-# ADD DISCOUNT SCORE DIRECTLY NEXT TO DISCOUNT POTENTIAL
+# DISCOUNT SCORE
 # ------------------------------------------------------------
 
 current_sellers.insert(
@@ -817,19 +855,15 @@ current_sellers.insert(
     "Discount Score",
     current_sellers.apply(
         lambda row: calculate_discount_score(
-            row[
-                "Discount Potential"
-            ],
-            row[
-                "Confidence"
-            ]
+            row["Discount Potential"],
+            row["Confidence"]
         ),
         axis=1
     )
 )
 
 # ------------------------------------------------------------
-# ADD ACTIONABILITY SCORE DIRECTLY NEXT TO ACTIONABILITY
+# ACTIONABILITY SCORE
 # ------------------------------------------------------------
 
 current_sellers.insert(
@@ -852,10 +886,12 @@ edited_sellers_full = st.data_editor(
     hide_index=True,
     num_rows="dynamic",
     key="seller_assumptions_editor",
+
     disabled=[
         "Discount Score",
         "Actionability Score"
     ],
+
     column_order=[
         "Owner",
         "Discount Potential",
@@ -864,6 +900,7 @@ edited_sellers_full = st.data_editor(
         "Actionability Score",
         "Confidence",
     ],
+
     column_config={
 
         "Discount Potential":
@@ -939,7 +976,6 @@ old_seller_assumptions = (
     .copy()
 )
 
-# Recalculate score columns immediately after an edit
 if not new_seller_assumptions.equals(
     old_seller_assumptions
 ):
@@ -1080,34 +1116,27 @@ def asset_score(row):
         status == "Operating"
         or detailed == "Construction Complete"
     ):
-
         return asset_operating
 
     if "More Than 50%" in detailed:
-
         return asset_50
 
     if status == "In Construction":
-
         return asset_construction
 
     if (
         status == "IA Executed"
         or ", IA" in detailed
     ):
-
         return asset_ia
 
     if "FIS Completed" in detailed:
-
         return asset_fis_complete
 
     if "FIS Started" in detailed:
-
         return asset_fis_started
 
     if status == "Pre-Study":
-
         return asset_pre
 
     if status in [
@@ -1115,7 +1144,6 @@ def asset_score(row):
         "Suspended",
         "Retired"
     ]:
-
         return asset_inactive
 
     return asset_studies
@@ -1147,15 +1175,12 @@ def market_score(row):
     )
 
     if contract and offtaker:
-
         return market_both
 
     if offtaker:
-
         return market_offtaker
 
     if contract:
-
         return market_contract
 
     return market_none
@@ -1196,7 +1221,6 @@ def energy_community(row):
             "yes",
             "1"
         ]:
-
             return "Yes"
 
     return "No"
@@ -1229,15 +1253,12 @@ def acquisition_value(row):
     )
 
     if tax_credit and ec:
-
         return value_both
 
     if tax_credit:
-
         return value_tax
 
     if ec:
-
         return value_ec
 
     return value_none
@@ -1265,10 +1286,7 @@ def timing_score(row):
         "First Power Date"
     ]
 
-    if pd.isna(
-        cod
-    ):
-
+    if pd.isna(cod):
         return timing_missing
 
     days = (
@@ -1277,19 +1295,15 @@ def timing_score(row):
     ).days
 
     if days <= 0:
-
         return timing_operating
 
     if days <= 365:
-
         return timing_1
 
     if days <= 730:
-
         return timing_2
 
     if days <= 1095:
-
         return timing_3
 
     return timing_long
@@ -1349,7 +1363,6 @@ def completeness(row):
             "Owner"
         )
     ):
-
         score += 40
 
     if has_value(
@@ -1357,7 +1370,6 @@ def completeness(row):
             "Queue ID"
         )
     ):
-
         score += 15
 
     if not pd.isna(
@@ -1365,7 +1377,6 @@ def completeness(row):
             "First Power Date"
         )
     ):
-
         score += 15
 
     if (
@@ -1381,7 +1392,6 @@ def completeness(row):
             )
         )
     ):
-
         score += 15
 
     if has_value(
@@ -1389,7 +1399,6 @@ def completeness(row):
             "PTC/ITC"
         )
     ):
-
         score += 15
 
     return score
@@ -1451,7 +1460,6 @@ def action(row):
             "Discount Potential"
         ]
     ):
-
         return "RESEARCH / MONITOR"
 
     score = row[
@@ -1459,15 +1467,12 @@ def action(row):
     ]
 
     if score >= 80:
-
         return "CONTACT / DILIGENCE"
 
     if score >= 70:
-
         return "INVESTIGATE"
 
     if score >= 60:
-
         return "MONITOR"
 
     return "LOW PRIORITY"
@@ -1587,9 +1592,7 @@ def why_it_ranks(row):
     )
 
     if (
-        not pd.isna(
-            capacity
-        )
+        not pd.isna(capacity)
         and capacity >= 100
     ):
 
@@ -1717,9 +1720,7 @@ df[
 
 st.divider()
 
-c1, c2, c3, c4 = st.columns(
-    4
-)
+c1, c2, c3, c4 = st.columns(4)
 
 c1.metric(
     "Projects Screened",
@@ -1763,9 +1764,7 @@ st.caption(
 )
 
 management_shortlist = (
-    df.head(
-        5
-    )
+    df.head(5)
     .copy()
 )
 
@@ -1807,6 +1806,7 @@ st.dataframe(
     ],
     use_container_width=True,
     hide_index=True,
+
     column_config={
 
         "Management Rank":
@@ -1833,16 +1833,6 @@ st.dataframe(
                 format="%.1f"
             ),
 
-        "Why It Ranks":
-            st.column_config.TextColumn(
-                "Why It Ranks"
-            ),
-
-        "Key Risk":
-            st.column_config.TextColumn(
-                "Key Risk"
-            ),
-
         "Recommended Action":
             st.column_config.TextColumn(
                 "Action"
@@ -1860,9 +1850,7 @@ st.subheader(
     "Filters"
 )
 
-f1, f2, f3 = st.columns(
-    3
-)
+f1, f2, f3 = st.columns(3)
 
 technology_options = sorted(
     df[
@@ -1981,15 +1969,14 @@ top_20 = (
     filtered[
         existing_display_columns
     ]
-    .head(
-        20
-    )
+    .head(20)
 )
 
 st.dataframe(
     top_20,
     use_container_width=True,
     hide_index=True,
+
     column_config={
 
         "Distress Score":
@@ -2080,9 +2067,7 @@ technology_ranked[
 
 technology_top_20 = (
     technology_ranked
-    .head(
-        20
-    )
+    .head(20)
 )
 
 tech_columns = [
@@ -2111,9 +2096,7 @@ tech_columns = [
     in technology_top_20.columns
 ]
 
-t1, t2, t3 = st.columns(
-    3
-)
+t1, t2, t3 = st.columns(3)
 
 t1.metric(
     f"{selected_tech_rank} Projects",
@@ -2142,6 +2125,7 @@ st.dataframe(
     ],
     use_container_width=True,
     hide_index=True,
+
     column_config={
 
         "Technology Rank":
@@ -2269,9 +2253,7 @@ if bundle_summary.empty:
 
 else:
 
-    b1, b2, b3 = st.columns(
-        3
-    )
+    b1, b2, b3 = st.columns(3)
 
     b1.metric(
         "Potential Bundles",
@@ -2294,10 +2276,6 @@ else:
         f"{bundle_summary['Bundle_MW'].sum():,.0f} MW"
     )
 
-    # --------------------------------------------------------
-    # BUNDLE SUMMARY
-    # --------------------------------------------------------
-
     st.markdown(
         "#### Bundle Summary"
     )
@@ -2306,7 +2284,6 @@ else:
         bundle_summary
         .rename(
             columns={
-
                 "Bundle_Projects":
                     "Projects",
 
@@ -2326,6 +2303,7 @@ else:
         bundle_summary_display,
         use_container_width=True,
         hide_index=True,
+
         column_config={
 
             "Bundle Rank":
@@ -2356,10 +2334,6 @@ else:
                 ),
         }
     )
-
-    # --------------------------------------------------------
-    # PROJECTS WITHIN EACH BUNDLE
-    # --------------------------------------------------------
 
     st.markdown(
         "#### Projects Within Each Bundle"
@@ -2443,6 +2417,7 @@ else:
                 ],
                 use_container_width=True,
                 hide_index=True,
+
                 column_config={
 
                     "Distress Score":
@@ -2491,13 +2466,9 @@ if len(
             "Power Project Name"
         ]
         == selected_project
-    ].iloc[
-        0
-    ]
+    ].iloc[0]
 
-    s1, s2, s3, s4, s5 = st.columns(
-        5
-    )
+    s1, s2, s3, s4, s5 = st.columns(5)
 
     s1.metric(
         "Seller Motivation",
@@ -2529,17 +2500,11 @@ if len(
         f"{project['Opportunity Score']:.2f}"
     )
 
-    # --------------------------------------------------------
-    # MANAGEMENT READOUT
-    # --------------------------------------------------------
-
     st.markdown(
         "#### Management Readout"
     )
 
-    r1, r2 = st.columns(
-        2
-    )
+    r1, r2 = st.columns(2)
 
     r1.info(
         f"**Why it ranks:**\n\n"
@@ -2608,7 +2573,6 @@ owner_summary_display = (
     owner_summary
     .rename(
         columns={
-
             "Average_Score":
                 "Average Score",
 
@@ -2619,11 +2583,10 @@ owner_summary_display = (
 )
 
 st.dataframe(
-    owner_summary_display.head(
-        25
-    ),
+    owner_summary_display.head(25),
     use_container_width=True,
     hide_index=True,
+
     column_config={
 
         "Average Score":
