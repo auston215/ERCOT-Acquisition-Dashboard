@@ -452,8 +452,12 @@ def actionability_score(value):
 st.markdown("## 📘 Dashboard Guide")
 
 guide_left, guide_right = st.columns(
-    [1.45, 1]
+    [1.5, 1]
 )
+
+# ------------------------------------------------------------
+# LEFT SIDE — SCORING
+# ------------------------------------------------------------
 
 with guide_left:
 
@@ -480,11 +484,11 @@ with guide_left:
                 f"{value_weight:.0%}",
                 f"{exec_weight:.0%}",
             ],
-            "What It Means": [
+            "What It Measures": [
                 "Likelihood owner is motivated to transact",
                 "Project maturity / operating status",
                 "Contract and offtaker visibility",
-                "Tax credit / Energy Community value",
+                "Tax-credit / Energy Community attributes",
                 "Ability to realistically execute a transaction",
             ],
         }
@@ -497,37 +501,23 @@ with guide_left:
     )
 
     # --------------------------------------------------------
-    # FULL FORMULA
+    # FORMULA
     # --------------------------------------------------------
 
-    st.markdown("#### Full Formula")
+    st.markdown("#### Formula")
 
     st.markdown(
         f"""
-        **Opportunity Score =**  
-        Seller Motivation × **{distress_weight:.0%}**  
-        + Asset Quality × **{asset_weight:.0%}**  
-        + Market / Revenue × **{market_weight:.0%}**  
-        + Acquisition Value × **{value_weight:.0%}**  
-        + Executability × **{exec_weight:.0%}**
+        **Opportunity Score = Seller Motivation × {distress_weight:.0%}
+        + Asset Quality × {asset_weight:.0%}
+        + Market / Revenue × {market_weight:.0%}
+        + Acquisition Value × {value_weight:.0%}
+        + Executability × {exec_weight:.0%}**
         """
     )
 
-    st.caption(
-        "Seller Motivation = Discount Potential score × Confidence. "
-        "Discount Potential 5 / 4 / 3 / 2 / 1 maps to "
-        "100 / 80 / 60 / 40 / 20."
-    )
-
-    st.caption(
-        f"Executability = Seller Actionability × "
-        f"{actionability_weight:.0%} + Timing × "
-        f"{timing_exec_weight:.0%} + Asset Quality × "
-        f"{asset_exec_weight:.0%}."
-    )
-
     # --------------------------------------------------------
-    # WORKED EXAMPLE
+    # EXAMPLE CALCULATIONS
     # --------------------------------------------------------
 
     example_seller = (
@@ -536,10 +526,13 @@ with guide_left:
     )
 
     example_asset = asset_operating
+
     example_market = market_both
+
     example_value = value_tax
 
     example_actionability = 100
+
     example_timing = timing_operating
 
     example_executability = (
@@ -572,17 +565,42 @@ with guide_left:
 
     st.markdown("#### Example")
 
-    st.caption(
-        f"Discount Potential 4 + High Confidence = "
-        f"{distress_4:.0f} Seller Motivation. "
-        f"Operating Asset = {example_asset:.0f}; "
-        f"Contract + Offtaker = {example_market:.0f}; "
-        f"Tax Credit = {example_value:.0f}; "
-        f"Executability = {example_executability:.0f}."
+    example_background = pd.DataFrame(
+        {
+            "Factor": [
+                "Seller Motivation",
+                "Asset Quality",
+                "Market / Revenue",
+                "Acquisition Value",
+                "Executability",
+            ],
+
+            "Score": [
+                example_seller,
+                example_asset,
+                example_market,
+                example_value,
+                example_executability,
+            ],
+
+            "Why": [
+                "Discount Potential 4 = 80; High Confidence = 100%; 80 × 100% = 80",
+                "Operating asset = 100",
+                "Contract + named offtaker = 95",
+                "Tax Credit only = 70",
+                "Actionability 100 × 50% + Timing 100 × 30% + Asset 100 × 20% = 100",
+            ],
+        }
+    )
+
+    st.dataframe(
+        example_background,
+        use_container_width=True,
+        hide_index=True
     )
 
     st.success(
-        f"Example Opportunity Score = "
+        f"Example Score = "
         f"({example_seller:.0f} × {distress_weight:.0%}) + "
         f"({example_asset:.0f} × {asset_weight:.0%}) + "
         f"({example_market:.0f} × {market_weight:.0%}) + "
@@ -590,6 +608,10 @@ with guide_left:
         f"({example_executability:.0f} × {exec_weight:.0%}) "
         f"= {example_final:.1f}"
     )
+
+# ------------------------------------------------------------
+# RIGHT SIDE — HOW TO USE
+# ------------------------------------------------------------
 
 with guide_right:
 
@@ -614,6 +636,238 @@ with guide_right:
         **60–69** → Monitor  
         **<60** → Low Priority
         """
+    )
+
+# ============================================================
+# FULL SCORE LOGIC — COLLAPSED
+# ============================================================
+
+with st.expander(
+    "📐 View Full Score Logic",
+    expanded=False
+):
+
+    # --------------------------------------------------------
+    # SELLER MOTIVATION
+    # --------------------------------------------------------
+
+    st.markdown("#### Seller Motivation")
+
+    st.caption(
+        "Discount Potential estimates seller motivation / potential "
+        "to transact. The base score is multiplied by confidence."
+    )
+
+    seller_logic = pd.DataFrame(
+        {
+            "Discount Potential": [
+                "5 – Very High",
+                "4 – High",
+                "3 – Moderate",
+                "2 – Low",
+                "1 – Very Low",
+                "No Signal",
+            ],
+            "Base Score": [
+                distress_5,
+                distress_4,
+                distress_3,
+                distress_2,
+                distress_1,
+                distress_none,
+            ],
+        }
+    )
+
+    st.dataframe(
+        seller_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    confidence_logic = pd.DataFrame(
+        {
+            "Confidence": [
+                "High",
+                "Medium",
+                "Low",
+            ],
+            "Multiplier": [
+                f"{confidence_high:.0%}",
+                f"{confidence_medium:.0%}",
+                f"{confidence_low:.0%}",
+            ],
+        }
+    )
+
+    st.dataframe(
+        confidence_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # ASSET QUALITY
+    # --------------------------------------------------------
+
+    st.markdown("#### Asset Quality")
+
+    asset_logic = pd.DataFrame(
+        {
+            "Stage": [
+                "Operating / Construction Complete",
+                ">50% Construction",
+                "In Construction",
+                "IA Executed",
+                "FIS Completed",
+                "FIS Started",
+                "Studies Undergoing / Other",
+                "Pre-Study",
+                "Inactive / Suspended / Retired",
+            ],
+            "Score": [
+                asset_operating,
+                asset_50,
+                asset_construction,
+                asset_ia,
+                asset_fis_complete,
+                asset_fis_started,
+                asset_studies,
+                asset_pre,
+                asset_inactive,
+            ],
+        }
+    )
+
+    st.dataframe(
+        asset_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # MARKET / REVENUE
+    # --------------------------------------------------------
+
+    st.markdown("#### Market / Revenue")
+
+    market_logic = pd.DataFrame(
+        {
+            "Revenue Visibility": [
+                "Contract + Named Offtaker",
+                "Named Offtaker Only",
+                "Contract Only",
+                "Neither",
+            ],
+            "Score": [
+                market_both,
+                market_offtaker,
+                market_contract,
+                market_none,
+            ],
+        }
+    )
+
+    st.dataframe(
+        market_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # ACQUISITION VALUE
+    # --------------------------------------------------------
+
+    st.markdown("#### Acquisition Value")
+
+    value_logic = pd.DataFrame(
+        {
+            "Attributes": [
+                "Tax Credit + Energy Community",
+                "Tax Credit Only",
+                "Energy Community Only",
+                "Neither",
+            ],
+            "Score": [
+                value_both,
+                value_tax,
+                value_ec,
+                value_none,
+            ],
+        }
+    )
+
+    st.dataframe(
+        value_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # EXECUTABILITY
+    # --------------------------------------------------------
+
+    st.markdown("#### Executability")
+
+    st.caption(
+        f"Executability = Seller Actionability × "
+        f"{actionability_weight:.0%} + Timing × "
+        f"{timing_exec_weight:.0%} + Asset Quality × "
+        f"{asset_exec_weight:.0%}"
+    )
+
+    actionability_logic = pd.DataFrame(
+        {
+            "Seller Actionability": [
+                5,
+                4,
+                3,
+                2,
+                1,
+                "Missing",
+            ],
+            "Score": [
+                100,
+                80,
+                60,
+                40,
+                20,
+                50,
+            ],
+        }
+    )
+
+    st.dataframe(
+        actionability_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    timing_logic = pd.DataFrame(
+        {
+            "Timing": [
+                "COD Reached / Passed",
+                "COD Within 1 Year",
+                "COD Within 2 Years",
+                "COD Within 3 Years",
+                "COD >3 Years",
+                "COD Missing",
+            ],
+            "Score": [
+                timing_operating,
+                timing_1,
+                timing_2,
+                timing_3,
+                timing_long,
+                timing_missing,
+            ],
+        }
+    )
+
+    st.dataframe(
+        timing_logic,
+        use_container_width=True,
+        hide_index=True
     )
 
 st.caption(
@@ -846,10 +1100,6 @@ current_sellers = (
     ].copy()
 )
 
-# ------------------------------------------------------------
-# DISCOUNT SCORE
-# ------------------------------------------------------------
-
 current_sellers.insert(
     2,
     "Discount Score",
@@ -862,10 +1112,6 @@ current_sellers.insert(
     )
 )
 
-# ------------------------------------------------------------
-# ACTIONABILITY SCORE
-# ------------------------------------------------------------
-
 current_sellers.insert(
     4,
     "Actionability Score",
@@ -875,10 +1121,6 @@ current_sellers.insert(
         actionability_score
     )
 )
-
-# ------------------------------------------------------------
-# EDITABLE TABLE
-# ------------------------------------------------------------
 
 edited_sellers_full = st.data_editor(
     current_sellers,
@@ -949,9 +1191,9 @@ edited_sellers_full = st.data_editor(
     }
 )
 
-# ------------------------------------------------------------
-# SAVE EDITABLE VALUES
-# ------------------------------------------------------------
+# ============================================================
+# SAVE EDITABLE SELLER VALUES
+# ============================================================
 
 editable_seller_columns = [
     "Owner",
@@ -991,10 +1233,6 @@ edited_sellers = (
         "seller_assumptions"
     ].copy()
 )
-
-# ------------------------------------------------------------
-# OWNER LOOKUP
-# ------------------------------------------------------------
 
 edited_sellers[
     "Owner Key"
@@ -1330,7 +1568,7 @@ df["Actionability Score"] = (
 )
 
 # ============================================================
-# EXECUTABILITY
+# EXECUTABILITY SCORE
 # ============================================================
 
 df["Executability"] = (
@@ -1359,16 +1597,12 @@ def completeness(row):
     score = 0
 
     if has_value(
-        row.get(
-            "Owner"
-        )
+        row.get("Owner")
     ):
         score += 40
 
     if has_value(
-        row.get(
-            "Queue ID"
-        )
+        row.get("Queue ID")
     ):
         score += 15
 
@@ -1522,66 +1756,42 @@ def why_it_ranks(row):
 
     reasons = []
 
-    if row[
-        "Distress Score"
-    ] >= 70:
-
+    if row["Distress Score"] >= 70:
         reasons.append(
             "Strong seller motivation / transaction angle"
         )
 
-    elif row[
-        "Distress Score"
-    ] >= 50:
-
+    elif row["Distress Score"] >= 50:
         reasons.append(
             "Credible seller opportunity"
         )
 
-    if row[
-        "Asset Quality"
-    ] >= 95:
-
+    if row["Asset Quality"] >= 95:
         reasons.append(
             "Operating / highly mature asset"
         )
 
-    elif row[
-        "Asset Quality"
-    ] >= 80:
-
+    elif row["Asset Quality"] >= 80:
         reasons.append(
             "Advanced-stage project"
         )
 
-    if row[
-        "Market / Revenue"
-    ] >= 90:
-
+    if row["Market / Revenue"] >= 90:
         reasons.append(
             "Strong visible revenue / offtaker profile"
         )
 
-    elif row[
-        "Market / Revenue"
-    ] >= 80:
-
+    elif row["Market / Revenue"] >= 80:
         reasons.append(
             "Some contracted revenue visibility"
         )
 
-    if row[
-        "Acquisition Value"
-    ] >= 70:
-
+    if row["Acquisition Value"] >= 70:
         reasons.append(
             "Attractive tax-credit / siting attributes"
         )
 
-    if row[
-        "Executability"
-    ] >= 80:
-
+    if row["Executability"] >= 80:
         reasons.append(
             "High execution readiness"
         )
@@ -1595,13 +1805,11 @@ def why_it_ranks(row):
         not pd.isna(capacity)
         and capacity >= 100
     ):
-
         reasons.append(
             f"{capacity:,.0f} MW scale"
         )
 
     if not reasons:
-
         reasons.append(
             "Strong composite Opportunity Score"
         )
@@ -1620,47 +1828,31 @@ def key_risk(row):
             "Discount Potential"
         ]
     ):
-
         risks.append(
             "Seller motivation not yet verified"
         )
 
-    elif row[
-        "Distress Score"
-    ] < 50:
-
+    elif row["Distress Score"] < 50:
         risks.append(
             "Limited evidence of seller pressure"
         )
 
-    if row[
-        "Asset Quality"
-    ] < 55:
-
+    if row["Asset Quality"] < 55:
         risks.append(
             "Early-stage development risk"
         )
 
-    elif row[
-        "Asset Quality"
-    ] < 75:
-
+    elif row["Asset Quality"] < 75:
         risks.append(
             "Development / execution risk remains"
         )
 
-    if row[
-        "Market / Revenue"
-    ] <= 45:
-
+    if row["Market / Revenue"] <= 45:
         risks.append(
             "Limited visible revenue certainty"
         )
 
-    elif row[
-        "Market / Revenue"
-    ] < 90:
-
+    elif row["Market / Revenue"] < 90:
         risks.append(
             "Revenue / offtaker visibility is incomplete"
         )
@@ -1670,21 +1862,16 @@ def key_risk(row):
             "First Power Date"
         ]
     ):
-
         risks.append(
             "COD timing unclear"
         )
 
-    if row[
-        "Data Completeness"
-    ] < 70:
-
+    if row["Data Completeness"] < 70:
         risks.append(
             "Material diligence data gaps"
         )
 
     if not risks:
-
         risks.append(
             "No major screen-level issue; full diligence still required"
         )
@@ -1708,11 +1895,7 @@ df["Key Risk"] = (
     )
 )
 
-df[
-    "Recommended Action"
-] = df[
-    "Action"
-]
+df["Recommended Action"] = df["Action"]
 
 # ============================================================
 # DASHBOARD KPIs
@@ -1736,9 +1919,7 @@ c3.metric(
     "Contact / Diligence",
     int(
         (
-            df[
-                "Action"
-            ]
+            df["Action"]
             == "CONTACT / DILIGENCE"
         ).sum()
     )
@@ -1846,9 +2027,7 @@ st.dataframe(
 
 st.divider()
 
-st.subheader(
-    "Filters"
-)
+st.subheader("Filters")
 
 f1, f2, f3 = st.columns(3)
 
@@ -1870,12 +2049,8 @@ owner_options = sorted(
     [
         owner
         for owner
-        in df[
-            "Owner"
-        ].unique()
-        if clean_text(
-            owner
-        )
+        in df["Owner"].unique()
+        if clean_text(owner)
     ]
 )
 
@@ -1959,10 +2134,8 @@ display_columns = [
 
 existing_display_columns = [
     col
-    for col
-    in display_columns
-    if col
-    in filtered.columns
+    for col in display_columns
+    if col in filtered.columns
 ]
 
 top_20 = (
@@ -2090,10 +2263,8 @@ tech_columns = [
 
 tech_columns = [
     col
-    for col
-    in tech_columns
-    if col
-    in technology_top_20.columns
+    for col in tech_columns
+    if col in technology_top_20.columns
 ]
 
 t1, t2, t3 = st.columns(3)
@@ -2405,10 +2576,8 @@ else:
 
             bundle_columns = [
                 col
-                for col
-                in bundle_columns
-                if col
-                in owner_projects.columns
+                for col in bundle_columns
+                if col in owner_projects.columns
             ]
 
             st.dataframe(
