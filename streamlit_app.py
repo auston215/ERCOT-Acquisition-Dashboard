@@ -38,6 +38,16 @@ def owner_key(value):
     return clean_text(value).lower()
 
 
+def format_date(value):
+    if pd.isna(value):
+        return "N/A"
+
+    try:
+        return pd.to_datetime(value).strftime("%m/%d/%Y")
+    except:
+        return clean_text(value)
+
+
 def map_ercot_area(value):
 
     zone = clean_text(value)
@@ -571,17 +581,13 @@ def calculate_discount_score(
     if pd.isna(
         potential
     ):
-
         return distress_none
 
     try:
-
         potential = int(
             potential
         )
-
     except:
-
         return distress_none
 
     base_score = discount_score_map.get(
@@ -612,17 +618,13 @@ def actionability_score(
     if pd.isna(
         value
     ):
-
         return 50
 
     try:
-
         value = int(
             value
         )
-
     except:
-
         return 50
 
     return actionability_points.get(
@@ -1957,7 +1959,6 @@ def energy_community(
     for col in energy_columns:
 
         if col not in row.index:
-
             continue
 
         value = clean_text(
@@ -3511,10 +3512,12 @@ if len(
 
     # --------------------------------------------------------
     # PROJECT CONTEXT
+    #
+    # NEW: COD ADDED DIRECTLY TO THE PROJECT BREAKDOWN
     # --------------------------------------------------------
 
-    p1, p2, p3, p4 = st.columns(
-        4
+    p1, p2, p3, p4, p5 = st.columns(
+        5
     )
 
     p1.metric(
@@ -3530,11 +3533,20 @@ if len(
     )
 
     p3.metric(
+        "COD",
+        format_date(
+            project.get(
+                "First Power Date"
+            )
+        )
+    )
+
+    p4.metric(
         "Capacity",
         f"{project['Capacity (MW)']:,.1f} MW"
     )
 
-    p4.metric(
+    p5.metric(
         "Status",
         clean_text(
             project.get(
@@ -3636,6 +3648,53 @@ if len(
         "Total Opportunity Score",
         f"{project['Opportunity Score']:.2f}"
     )
+
+    # --------------------------------------------------------
+    # EXECUTABILITY DETAIL
+    # --------------------------------------------------------
+
+    st.markdown(
+        "#### Executability Detail"
+    )
+
+    e1, e2, e3, e4 = st.columns(
+        4
+    )
+
+    e1.metric(
+        "Seller Actionability",
+        f"{project['Actionability Score']:.1f}"
+    )
+
+    e2.metric(
+        "Timing Score",
+        f"{project['Timing Score']:.1f}"
+    )
+
+    e3.metric(
+        "Asset Quality",
+        f"{project['Asset Quality']:.1f}"
+    )
+
+    e4.metric(
+        "Executability",
+        f"{project['Executability']:.1f}"
+    )
+
+    st.caption(
+        f"Executability = "
+        f"{project['Actionability Score']:.1f} × "
+        f"{actionability_weight:.0%} + "
+        f"{project['Timing Score']:.1f} × "
+        f"{timing_exec_weight:.0%} + "
+        f"{project['Asset Quality']:.1f} × "
+        f"{asset_exec_weight:.0%} = "
+        f"{project['Executability']:.1f}"
+    )
+
+    # --------------------------------------------------------
+    # MANAGEMENT READOUT
+    # --------------------------------------------------------
 
     st.markdown(
         "#### Management Readout"
