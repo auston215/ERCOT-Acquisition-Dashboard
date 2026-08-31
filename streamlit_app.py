@@ -15,7 +15,7 @@ st.set_page_config(
 
 st.title("⚡ ERCOT Acquisition Dashboard")
 st.caption(
-    "Distressed M&A screening tool for ERCOT solar, battery storage, "
+    "M&A screening tool for ERCOT solar, battery storage, "
     "and operating wind projects"
 )
 
@@ -118,15 +118,15 @@ else:
     st.sidebar.success("Weights = 100%")
 
 # ------------------------------------------------------------
-# SIDEBAR — HARD SCORING INPUTS
+# SIDEBAR — SCORING INPUTS
 # ------------------------------------------------------------
 
 st.sidebar.divider()
 st.sidebar.header("3. Scoring Inputs")
 
-# -----------------------------
+# ------------------------------------------------------------
 # SELLER DISTRESS
-# -----------------------------
+# ------------------------------------------------------------
 
 with st.sidebar.expander("Seller Distress Points"):
 
@@ -187,10 +187,9 @@ with st.sidebar.expander("Seller Distress Points"):
         key="confidence_low"
     )
 
-
-# -----------------------------
+# ------------------------------------------------------------
 # ASSET QUALITY
-# -----------------------------
+# ------------------------------------------------------------
 
 with st.sidebar.expander("Asset Quality Points"):
 
@@ -248,10 +247,9 @@ with st.sidebar.expander("Asset Quality Points"):
         key="asset_inactive"
     )
 
-
-# -----------------------------
+# ------------------------------------------------------------
 # MARKET / REVENUE
-# -----------------------------
+# ------------------------------------------------------------
 
 with st.sidebar.expander("Market / Revenue Points"):
 
@@ -279,10 +277,9 @@ with st.sidebar.expander("Market / Revenue Points"):
         key="market_none"
     )
 
-
-# -----------------------------
+# ------------------------------------------------------------
 # ACQUISITION VALUE
-# -----------------------------
+# ------------------------------------------------------------
 
 with st.sidebar.expander("Acquisition Value Points"):
 
@@ -310,10 +307,9 @@ with st.sidebar.expander("Acquisition Value Points"):
         key="value_none"
     )
 
-
-# -----------------------------
+# ------------------------------------------------------------
 # TIMING
-# -----------------------------
+# ------------------------------------------------------------
 
 with st.sidebar.expander("Timing Points"):
 
@@ -353,10 +349,9 @@ with st.sidebar.expander("Timing Points"):
         key="timing_missing"
     )
 
-
-# -----------------------------
+# ------------------------------------------------------------
 # EXECUTABILITY
-# -----------------------------
+# ------------------------------------------------------------
 
 with st.sidebar.expander("Executability Mix"):
 
@@ -534,7 +529,7 @@ df = df[
 ].copy()
 
 # ------------------------------------------------------------
-# SELLER ASSUMPTIONS — EDITABLE
+# SELLER ASSUMPTIONS
 # ------------------------------------------------------------
 
 st.subheader(
@@ -617,9 +612,7 @@ confidence_points = {
 
 def distress_score(row):
 
-    discount = row[
-        "Discount Potential"
-    ]
+    discount = row["Discount Potential"]
 
     if pd.isna(discount):
         return distress_none
@@ -629,9 +622,7 @@ def distress_score(row):
         distress_none
     )
 
-    confidence = row[
-        "Seller Confidence"
-    ]
+    confidence = row["Seller Confidence"]
 
     multiplier = confidence_points.get(
         confidence,
@@ -653,15 +644,11 @@ df["Distress Score"] = df.apply(
 def asset_score(row):
 
     status = clean_text(
-        row.get(
-            "Power Project Status"
-        )
+        row.get("Power Project Status")
     )
 
     detailed = clean_text(
-        row.get(
-            "Detailed Status"
-        )
+        row.get("Detailed Status")
     )
 
     if (
@@ -713,15 +700,11 @@ df["Asset Quality"] = df.apply(
 def market_score(row):
 
     contract = has_value(
-        row.get(
-            "Contract Type"
-        )
+        row.get("Contract Type")
     )
 
     offtaker = has_value(
-        row.get(
-            "Contract Offtaker"
-        )
+        row.get("Contract Offtaker")
     )
 
     if contract and offtaker:
@@ -786,9 +769,7 @@ df["Energy Community"] = df.apply(
 def acquisition_value(row):
 
     tax_credit = has_value(
-        row.get(
-            "PTC/ITC"
-        )
+        row.get("PTC/ITC")
     )
 
     ec = (
@@ -824,9 +805,7 @@ as_of_date = pd.Timestamp(
 
 def timing_score(row):
 
-    cod = row[
-        "First Power Date"
-    ]
+    cod = row["First Power Date"]
 
     if pd.isna(cod):
         return timing_missing
@@ -856,7 +835,7 @@ df["Timing Score"] = df.apply(
 )
 
 # ------------------------------------------------------------
-# SELLER ACTIONABILITY SCORE
+# ACTIONABILITY
 # ------------------------------------------------------------
 
 actionability_points = {
@@ -885,7 +864,7 @@ df["Actionability Score"] = (
 )
 
 # ------------------------------------------------------------
-# EXECUTABILITY SCORE
+# EXECUTABILITY
 # ------------------------------------------------------------
 
 df["Executability"] = (
@@ -907,41 +886,29 @@ def completeness(row):
 
     score = 0
 
-    if has_value(
-        row.get("Owner")
-    ):
+    if has_value(row.get("Owner")):
         score += 40
 
-    if has_value(
-        row.get("Queue ID")
-    ):
+    if has_value(row.get("Queue ID")):
         score += 15
 
     if not pd.isna(
-        row.get(
-            "First Power Date"
-        )
+        row.get("First Power Date")
     ):
         score += 15
 
     if (
         has_value(
-            row.get(
-                "Contract Type"
-            )
+            row.get("Contract Type")
         )
         or has_value(
-            row.get(
-                "Contract Offtaker"
-            )
+            row.get("Contract Offtaker")
         )
     ):
         score += 15
 
     if has_value(
-        row.get(
-            "PTC/ITC"
-        )
+        row.get("PTC/ITC")
     ):
         score += 15
 
@@ -986,9 +953,7 @@ df["Opportunity Score"] = (
 def action(row):
 
     if pd.isna(
-        row[
-            "Discount Potential"
-        ]
+        row["Discount Potential"]
     ):
         return "RESEARCH / MONITOR"
 
@@ -1014,7 +979,7 @@ df["Action"] = df.apply(
 )
 
 # ------------------------------------------------------------
-# OVERALL PROJECT RANK
+# OVERALL RANK
 # ------------------------------------------------------------
 
 df = (
@@ -1030,16 +995,166 @@ df = (
             False
         ]
     )
-    .reset_index(
-        drop=True
-    )
+    .reset_index(drop=True)
 )
 
 df["Rank"] = (
-    np.arange(
-        len(df)
-    ) + 1
+    np.arange(len(df)) + 1
 )
+
+# ============================================================
+# MANAGEMENT EXPLANATION LOGIC
+# ============================================================
+
+def why_it_ranks(row):
+
+    reasons = []
+
+    # Seller angle
+    if row["Distress Score"] >= 70:
+        reasons.append(
+            "Strong seller motivation / transaction angle"
+        )
+
+    elif row["Distress Score"] >= 50:
+        reasons.append(
+            "Credible seller opportunity"
+        )
+
+    # Asset maturity
+    if row["Asset Quality"] >= 95:
+        reasons.append(
+            "Operating / highly mature asset"
+        )
+
+    elif row["Asset Quality"] >= 80:
+        reasons.append(
+            "Advanced-stage project"
+        )
+
+    # Revenue
+    if row["Market / Revenue"] >= 90:
+        reasons.append(
+            "Strong visible revenue / offtaker profile"
+        )
+
+    elif row["Market / Revenue"] >= 80:
+        reasons.append(
+            "Some contracted revenue visibility"
+        )
+
+    # Acquisition value
+    if row["Acquisition Value"] >= 70:
+        reasons.append(
+            "Attractive tax-credit / siting attributes"
+        )
+
+    # Executability
+    if row["Executability"] >= 80:
+        reasons.append(
+            "High execution readiness"
+        )
+
+    # Scale
+    capacity = row.get(
+        "Capacity (MW)",
+        np.nan
+    )
+
+    if (
+        not pd.isna(capacity)
+        and capacity >= 100
+    ):
+        reasons.append(
+            f"{capacity:,.0f} MW scale"
+        )
+
+    if not reasons:
+        reasons.append(
+            "Strong composite Opportunity Score"
+        )
+
+    return "; ".join(
+        reasons[:3]
+    )
+
+
+def key_risk(row):
+
+    risks = []
+
+    # Seller certainty
+    if pd.isna(
+        row["Discount Potential"]
+    ):
+        risks.append(
+            "Seller motivation not yet verified"
+        )
+
+    elif row["Distress Score"] < 50:
+        risks.append(
+            "Limited evidence of seller pressure"
+        )
+
+    # Asset maturity
+    if row["Asset Quality"] < 55:
+        risks.append(
+            "Early-stage development risk"
+        )
+
+    elif row["Asset Quality"] < 75:
+        risks.append(
+            "Development / execution risk remains"
+        )
+
+    # Revenue
+    if row["Market / Revenue"] <= 45:
+        risks.append(
+            "Limited visible revenue certainty"
+        )
+
+    elif row["Market / Revenue"] < 90:
+        risks.append(
+            "Revenue / offtaker visibility is incomplete"
+        )
+
+    # COD
+    if pd.isna(
+        row["First Power Date"]
+    ):
+        risks.append(
+            "COD timing unclear"
+        )
+
+    # Data
+    if row["Data Completeness"] < 70:
+        risks.append(
+            "Material diligence data gaps"
+        )
+
+    if not risks:
+        risks.append(
+            "No major screen-level issue; full diligence still required"
+        )
+
+    return "; ".join(
+        risks[:2]
+    )
+
+
+df["Why It Ranks"] = df.apply(
+    why_it_ranks,
+    axis=1
+)
+
+df["Key Risk"] = df.apply(
+    key_risk,
+    axis=1
+)
+
+df["Recommended Action"] = df[
+    "Action"
+]
 
 # ============================================================
 # DASHBOARD KPIs
@@ -1075,8 +1190,107 @@ c4.metric(
 )
 
 # ============================================================
+# MANAGEMENT SHORTLIST
+# ============================================================
+
+st.divider()
+
+st.subheader(
+    "🎯 Management Shortlist"
+)
+
+st.caption(
+    "Highest-priority opportunities based on the current "
+    "screening assumptions, with an automated investment thesis "
+    "and key screen-level risk."
+)
+
+management_shortlist = (
+    df.head(5)
+    .copy()
+)
+
+management_shortlist[
+    "Management Rank"
+] = (
+    np.arange(
+        len(management_shortlist)
+    ) + 1
+)
+
+management_columns = [
+    "Management Rank",
+    "Power Project Name",
+    "Owner",
+    "Power Project Type",
+    "Capacity (MW)",
+    "Power Project Status",
+    "Opportunity Score",
+    "Why It Ranks",
+    "Key Risk",
+    "Recommended Action",
+]
+
+management_columns = [
+    col
+    for col in management_columns
+    if col in management_shortlist.columns
+]
+
+st.dataframe(
+    management_shortlist[
+        management_columns
+    ],
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+
+        "Management Rank":
+            st.column_config.NumberColumn(
+                "Rank"
+            ),
+
+        "Power Project Type":
+            st.column_config.TextColumn(
+                "Tech"
+            ),
+
+        "Capacity (MW)":
+            st.column_config.NumberColumn(
+                "MW",
+                format="%.1f"
+            ),
+
+        "Opportunity Score":
+            st.column_config.ProgressColumn(
+                "Score",
+                min_value=0,
+                max_value=100,
+                format="%.1f"
+            ),
+
+        "Why It Ranks":
+            st.column_config.TextColumn(
+                "Why It Ranks"
+            ),
+
+        "Key Risk":
+            st.column_config.TextColumn(
+                "Key Risk"
+            ),
+
+        "Recommended Action":
+            st.column_config.TextColumn(
+                "Recommended Action"
+            ),
+    }
+)
+
+# ============================================================
 # GLOBAL FILTERS
 # ============================================================
+
+st.divider()
 
 st.subheader("Filters")
 
@@ -1099,8 +1313,7 @@ selected_technology = f1.multiselect(
 owner_options = sorted(
     [
         owner
-        for owner
-        in df["Owner"].unique()
+        for owner in df["Owner"].unique()
         if clean_text(owner)
     ]
 )
@@ -1151,15 +1364,17 @@ if selected_owners:
     ]
 
 # ============================================================
-# TOP ACQUISITION TARGETS — OVERALL
+# TOP ACQUISITION TARGETS
 # ============================================================
+
+st.divider()
 
 st.subheader(
     "🏆 Top Acquisition Targets"
 )
 
 st.caption(
-    "Top 20 projects across all included technologies based on Opportunity Score."
+    "Top 20 projects based on Opportunity Score."
 )
 
 display_columns = [
@@ -1226,7 +1441,7 @@ st.subheader(
 )
 
 st.caption(
-    "Select Solar, Storage, or Wind to view the Top 20 projects "
+    "Select Solar, Storage, or Wind to view the Top 20 "
     "within that technology."
 )
 
@@ -1244,14 +1459,12 @@ selected_tech_rank = st.selectbox(
     key="technology_ranking"
 )
 
-# Filter to the selected technology
 technology_ranked = df[
     df[
         "Power Project Type"
     ] == selected_tech_rank
 ].copy()
 
-# Sort within technology
 technology_ranked = (
     technology_ranked
     .sort_values(
@@ -1266,23 +1479,17 @@ technology_ranked = (
             False
         ]
     )
-    .reset_index(
-        drop=True
-    )
+    .reset_index(drop=True)
 )
 
-# Create technology-specific rank
 technology_ranked[
     "Technology Rank"
 ] = (
     np.arange(
-        len(
-            technology_ranked
-        )
+        len(technology_ranked)
     ) + 1
 )
 
-# Keep only Top 20
 technology_top_20 = (
     technology_ranked
     .head(20)
@@ -1312,14 +1519,11 @@ tech_columns = [
     if col in technology_top_20.columns
 ]
 
-# Technology KPIs
 t1, t2, t3 = st.columns(3)
 
 t1.metric(
     f"{selected_tech_rank} Projects",
-    len(
-        technology_ranked
-    )
+    len(technology_ranked)
 )
 
 t2.metric(
@@ -1373,13 +1577,10 @@ st.subheader(
 )
 
 st.caption(
-    "Owners with at least two ERCOT projects between 50 MW and 60 MW. "
-    "Bundles are ranked by average Opportunity Score."
+    "Owners with at least two ERCOT projects between "
+    "50 MW and 60 MW. Bundles are ranked by average "
+    "Opportunity Score."
 )
-
-# ------------------------------------------------------------
-# IDENTIFY 50–60 MW PROJECTS
-# ------------------------------------------------------------
 
 bundle_candidates = df[
     df[
@@ -1390,10 +1591,6 @@ bundle_candidates = df[
         inclusive="both"
     )
 ].copy()
-
-# ------------------------------------------------------------
-# BUILD BUNDLE SUMMARY
-# ------------------------------------------------------------
 
 bundle_summary = (
     bundle_candidates
@@ -1425,16 +1622,11 @@ bundle_summary = (
     )
 )
 
-# Only owners with at least two qualifying projects
 bundle_summary = bundle_summary[
     bundle_summary[
         "Bundle_Projects"
     ] >= 2
 ].copy()
-
-# ------------------------------------------------------------
-# RANK BUNDLES BY AVERAGE SCORE
-# ------------------------------------------------------------
 
 bundle_summary = (
     bundle_summary
@@ -1450,9 +1642,7 @@ bundle_summary = (
             False
         ]
     )
-    .reset_index(
-        drop=True
-    )
+    .reset_index(drop=True)
 )
 
 bundle_summary.insert(
@@ -1471,17 +1661,11 @@ if bundle_summary.empty:
 
 else:
 
-    # --------------------------------------------------------
-    # BUNDLE KPIs
-    # --------------------------------------------------------
-
     b1, b2, b3 = st.columns(3)
 
     b1.metric(
         "Potential Bundles",
-        len(
-            bundle_summary
-        )
+        len(bundle_summary)
     )
 
     b2.metric(
@@ -1499,7 +1683,7 @@ else:
     )
 
     # --------------------------------------------------------
-    # BUNDLE SUMMARY TABLE
+    # BUNDLE SUMMARY
     # --------------------------------------------------------
 
     st.markdown(
@@ -1599,8 +1783,7 @@ else:
             bundle_candidates[
                 bundle_candidates[
                     "Owner"
-                ]
-                == bundle_owner
+                ] == bundle_owner
             ]
             .sort_values(
                 "Opportunity Score",
@@ -1719,6 +1902,20 @@ if len(filtered) > 0:
         f"{project['Opportunity Score']:.2f}"
     )
 
+    st.markdown("#### Management Readout")
+
+    r1, r2 = st.columns(2)
+
+    r1.info(
+        f"**Why it ranks:**\n\n"
+        f"{project['Why It Ranks']}"
+    )
+
+    r2.warning(
+        f"**Key risk:**\n\n"
+        f"{project['Key Risk']}"
+    )
+
 # ============================================================
 # OWNER OPPORTUNITY SUMMARY
 # ============================================================
@@ -1776,6 +1973,7 @@ owner_summary_display = (
     owner_summary
     .rename(
         columns={
+
             "Average_Score":
                 "Average Score",
 
@@ -1817,9 +2015,7 @@ csv = (
     df.to_csv(
         index=False
     )
-    .encode(
-        "utf-8"
-    )
+    .encode("utf-8")
 )
 
 st.download_button(
