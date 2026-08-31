@@ -145,7 +145,9 @@ if abs(total_weight - 1.0) > 0.001:
 
 else:
 
-    st.sidebar.success("Weights = 100%")
+    st.sidebar.success(
+        "Overall Weights = 100%"
+    )
 
 # ============================================================
 # SIDEBAR — SCORING INPUTS
@@ -282,11 +284,11 @@ with st.sidebar.expander(
     )
 
 # ------------------------------------------------------------
-# MARKET / REVENUE
+# REVENUE VISIBILITY
 # ------------------------------------------------------------
 
 with st.sidebar.expander(
-    "Market / Revenue Points"
+    "Revenue Visibility Points"
 ):
 
     market_both = st.number_input(
@@ -311,6 +313,91 @@ with st.sidebar.expander(
         "Neither Contract nor Offtaker",
         value=45,
         key="market_none"
+    )
+
+# ------------------------------------------------------------
+# ERCOT LOCATION ATTRACTIVENESS
+# ------------------------------------------------------------
+
+with st.sidebar.expander(
+    "ERCOT Location Points"
+):
+
+    location_north = st.number_input(
+        "ERCOT-N",
+        value=90,
+        key="location_north"
+    )
+
+    location_houston = st.number_input(
+        "ERCOT-H",
+        value=85,
+        key="location_houston"
+    )
+
+    location_south = st.number_input(
+        "ERCOT-S",
+        value=70,
+        key="location_south"
+    )
+
+    location_west = st.number_input(
+        "ERCOT-W",
+        value=60,
+        key="location_west"
+    )
+
+    location_panhandle = st.number_input(
+        "Panhandle",
+        value=50,
+        key="location_panhandle"
+    )
+
+    location_unknown = st.number_input(
+        "Unknown / Other",
+        value=50,
+        key="location_unknown"
+    )
+
+# ------------------------------------------------------------
+# MARKET / REVENUE MIX
+# ------------------------------------------------------------
+
+with st.sidebar.expander(
+    "Market / Revenue Mix"
+):
+
+    revenue_visibility_weight = st.number_input(
+        "Revenue Visibility %",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.70,
+        step=0.05,
+        key="revenue_visibility_weight"
+    )
+
+    location_market_weight = st.number_input(
+        "ERCOT Location %",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.30,
+        step=0.05,
+        key="location_market_weight"
+    )
+
+market_mix_total = (
+    revenue_visibility_weight
+    + location_market_weight
+)
+
+if abs(
+    market_mix_total
+    - 1.0
+) > 0.001:
+
+    st.sidebar.warning(
+        f"Market / Revenue mix totals "
+        f"{market_mix_total:.0%}. It should equal 100%."
     )
 
 # ------------------------------------------------------------
@@ -399,6 +486,8 @@ with st.sidebar.expander(
 
     actionability_weight = st.number_input(
         "Seller Actionability %",
+        min_value=0.0,
+        max_value=1.0,
         value=0.50,
         step=0.05,
         key="actionability_weight"
@@ -406,6 +495,8 @@ with st.sidebar.expander(
 
     timing_exec_weight = st.number_input(
         "Timing %",
+        min_value=0.0,
+        max_value=1.0,
         value=0.30,
         step=0.05,
         key="timing_exec_weight"
@@ -413,9 +504,27 @@ with st.sidebar.expander(
 
     asset_exec_weight = st.number_input(
         "Asset Quality %",
+        min_value=0.0,
+        max_value=1.0,
         value=0.20,
         step=0.05,
         key="asset_exec_weight"
+    )
+
+exec_mix_total = (
+    actionability_weight
+    + timing_exec_weight
+    + asset_exec_weight
+)
+
+if abs(
+    exec_mix_total
+    - 1.0
+) > 0.001:
+
+    st.sidebar.warning(
+        f"Executability mix totals "
+        f"{exec_mix_total:.0%}. It should equal 100%."
     )
 
 # ============================================================
@@ -444,18 +553,35 @@ actionability_points = {
     1: 20,
 }
 
+location_points = {
+    "ERCOT-N": location_north,
+    "ERCOT-H": location_houston,
+    "ERCOT-S": location_south,
+    "ERCOT-W": location_west,
+    "Panhandle": location_panhandle,
+    "Unknown": location_unknown,
+}
+
 
 def calculate_discount_score(
     potential,
     confidence
 ):
 
-    if pd.isna(potential):
+    if pd.isna(
+        potential
+    ):
+
         return distress_none
 
     try:
-        potential = int(potential)
+
+        potential = int(
+            potential
+        )
+
     except:
+
         return distress_none
 
     base_score = discount_score_map.get(
@@ -465,7 +591,9 @@ def calculate_discount_score(
 
     confidence_multiplier = (
         confidence_score_map.get(
-            clean_text(confidence),
+            clean_text(
+                confidence
+            ),
             confidence_low
         )
     )
@@ -477,20 +605,43 @@ def calculate_discount_score(
     )
 
 
-def actionability_score(value):
+def actionability_score(
+    value
+):
 
-    if pd.isna(value):
+    if pd.isna(
+        value
+    ):
+
         return 50
 
     try:
-        value = int(value)
+
+        value = int(
+            value
+        )
+
     except:
+
         return 50
 
     return actionability_points.get(
         value,
         50
     )
+
+
+def location_score(
+    area
+):
+
+    return location_points.get(
+        clean_text(
+            area
+        ),
+        location_unknown
+    )
+
 
 # ============================================================
 # QUICK DASHBOARD GUIDE
@@ -501,11 +652,11 @@ st.markdown(
 )
 
 guide_left, guide_right = st.columns(
-    [1.5, 1]
+    [1.55, 1]
 )
 
 # ------------------------------------------------------------
-# LEFT — SCORING
+# LEFT — SCORE
 # ------------------------------------------------------------
 
 with guide_left:
@@ -540,7 +691,7 @@ with guide_left:
             "What It Measures": [
                 "Likelihood owner is motivated to transact",
                 "Project maturity / operating status",
-                "Contract and offtaker visibility",
+                "Revenue visibility + ERCOT location",
                 "Tax-credit / Energy Community attributes",
                 "Ability to realistically execute a transaction",
             ],
@@ -554,7 +705,7 @@ with guide_left:
     )
 
     # --------------------------------------------------------
-    # FORMULA
+    # MAIN FORMULA
     # --------------------------------------------------------
 
     st.markdown(
@@ -571,6 +722,19 @@ with guide_left:
         """
     )
 
+    st.caption(
+        f"Market / Revenue = Revenue Visibility × "
+        f"{revenue_visibility_weight:.0%} + ERCOT Location × "
+        f"{location_market_weight:.0%}."
+    )
+
+    st.caption(
+        f"Executability = Seller Actionability × "
+        f"{actionability_weight:.0%} + Timing × "
+        f"{timing_exec_weight:.0%} + Asset Quality × "
+        f"{asset_exec_weight:.0%}."
+    )
+
     # --------------------------------------------------------
     # EXAMPLE
     # --------------------------------------------------------
@@ -580,12 +744,35 @@ with guide_left:
         * confidence_high
     )
 
-    example_asset = asset_operating
-    example_market = market_both
-    example_value = value_tax
+    example_asset = (
+        asset_operating
+    )
+
+    example_revenue = (
+        market_both
+    )
+
+    example_location = (
+        location_north
+    )
+
+    example_market = (
+        example_revenue
+        * revenue_visibility_weight
+        +
+        example_location
+        * location_market_weight
+    )
+
+    example_value = (
+        value_tax
+    )
 
     example_actionability = 100
-    example_timing = timing_operating
+
+    example_timing = (
+        timing_operating
+    )
 
     example_executability = (
         example_actionability
@@ -638,11 +825,40 @@ with guide_left:
             ],
 
             "Why": [
-                "Discount Potential 4 = 80; High Confidence = 100%; 80 × 100% = 80",
-                "Operating asset = 100",
-                "Contract + named offtaker = 95",
-                "Tax Credit only = 70",
-                "Actionability 100 × 50% + Timing 100 × 30% + Asset 100 × 20% = 100",
+                (
+                    "Discount Potential 4 = 80; "
+                    "High Confidence = 100%; "
+                    "80 × 100% = 80"
+                ),
+
+                (
+                    "Operating asset = 100"
+                ),
+
+                (
+                    f"Contract + named offtaker = "
+                    f"{example_revenue:.0f}; "
+                    f"ERCOT-N = {example_location:.0f}; "
+                    f"{example_revenue:.0f} × "
+                    f"{revenue_visibility_weight:.0%} + "
+                    f"{example_location:.0f} × "
+                    f"{location_market_weight:.0%} = "
+                    f"{example_market:.1f}"
+                ),
+
+                (
+                    "Tax Credit only = 70"
+                ),
+
+                (
+                    f"Actionability 100 × "
+                    f"{actionability_weight:.0%} + "
+                    f"Timing 100 × "
+                    f"{timing_exec_weight:.0%} + "
+                    f"Asset 100 × "
+                    f"{asset_exec_weight:.0%} = "
+                    f"{example_executability:.0f}"
+                ),
             ],
         }
     )
@@ -657,7 +873,7 @@ with guide_left:
         f"Example Score = "
         f"({example_seller:.0f} × {distress_weight:.0%}) + "
         f"({example_asset:.0f} × {asset_weight:.0%}) + "
-        f"({example_market:.0f} × {market_weight:.0%}) + "
+        f"({example_market:.1f} × {market_weight:.0%}) + "
         f"({example_value:.0f} × {value_weight:.0%}) + "
         f"({example_executability:.0f} × {exec_weight:.0%}) "
         f"= {example_final:.1f}"
@@ -678,7 +894,7 @@ with guide_right:
         **1. Management Shortlist** — Top 5 priorities  
         **2. Top Acquisition Targets** — Top 20 overall  
         **3. By Technology** — Solar, Storage or Wind  
-        **4. ERCOT Area** — Compare opportunities by market area  
+        **4. ERCOT Area** — Compare market location  
         **5. Bundles** — Multiple 50–60 MW assets by owner  
         **6. Score Breakdown** — Drill into a project
         """
@@ -697,6 +913,42 @@ with guide_right:
         """
     )
 
+    st.markdown(
+        "### 🗺️ Location Logic"
+    )
+
+    location_guide = pd.DataFrame(
+        {
+            "Area": [
+                "ERCOT-N",
+                "ERCOT-H",
+                "ERCOT-S",
+                "ERCOT-W",
+                "Panhandle",
+            ],
+
+            "Score": [
+                location_north,
+                location_houston,
+                location_south,
+                location_west,
+                location_panhandle,
+            ],
+        }
+    )
+
+    st.dataframe(
+        location_guide,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.caption(
+        "Location is a broad screening proxy. "
+        "Node-level congestion, basis, curtailment and market "
+        "fundamentals can materially differ within each area."
+    )
+
 # ============================================================
 # FULL SCORE LOGIC
 # ============================================================
@@ -706,8 +958,18 @@ with st.expander(
     expanded=False
 ):
 
+    # --------------------------------------------------------
+    # SELLER MOTIVATION
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Seller Motivation"
+    )
+
+    st.caption(
+        "Discount Potential measures the strength of the seller "
+        "motivation / transaction opportunity. The base score is "
+        "then adjusted by confidence."
     )
 
     seller_logic = pd.DataFrame(
@@ -760,6 +1022,10 @@ with st.expander(
         hide_index=True
     )
 
+    # --------------------------------------------------------
+    # ASSET QUALITY
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Asset Quality"
     )
@@ -798,8 +1064,22 @@ with st.expander(
         hide_index=True
     )
 
+    # --------------------------------------------------------
+    # MARKET / REVENUE
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Market / Revenue"
+    )
+
+    st.caption(
+        f"Market / Revenue = Revenue Visibility × "
+        f"{revenue_visibility_weight:.0%} + ERCOT Location × "
+        f"{location_market_weight:.0%}."
+    )
+
+    st.markdown(
+        "**Revenue Visibility**"
     )
 
     market_logic = pd.DataFrame(
@@ -825,6 +1105,58 @@ with st.expander(
         use_container_width=True,
         hide_index=True
     )
+
+    st.markdown(
+        "**ERCOT Location Attractiveness**"
+    )
+
+    location_logic = pd.DataFrame(
+        {
+            "ERCOT Area": [
+                "ERCOT-N",
+                "ERCOT-H",
+                "ERCOT-S",
+                "ERCOT-W",
+                "Panhandle",
+                "Unknown / Other",
+            ],
+
+            "Location Score": [
+                location_north,
+                location_houston,
+                location_south,
+                location_west,
+                location_panhandle,
+                location_unknown,
+            ],
+
+            "Use": [
+                "Higher initial market-location screen",
+                "Higher initial market-location screen",
+                "Moderate market-location screen",
+                "Lower broad-area screen",
+                "Lower broad-area screen",
+                "Neutral / insufficient location information",
+            ],
+        }
+    )
+
+    st.dataframe(
+        location_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.caption(
+        "These are editable screening assumptions, not project valuations. "
+        "Actual attractiveness should ultimately be evaluated at the "
+        "specific node / POI using congestion, basis, curtailment, "
+        "load growth and technology-specific economics."
+    )
+
+    # --------------------------------------------------------
+    # ACQUISITION VALUE
+    # --------------------------------------------------------
 
     st.markdown(
         "#### Acquisition Value"
@@ -854,6 +1186,10 @@ with st.expander(
         hide_index=True
     )
 
+    # --------------------------------------------------------
+    # EXECUTABILITY
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Executability"
     )
@@ -862,7 +1198,7 @@ with st.expander(
         f"Executability = Seller Actionability × "
         f"{actionability_weight:.0%} + Timing × "
         f"{timing_exec_weight:.0%} + Asset Quality × "
-        f"{asset_exec_weight:.0%}"
+        f"{asset_exec_weight:.0%}."
     )
 
     actionability_logic = pd.DataFrame(
@@ -922,8 +1258,9 @@ with st.expander(
     )
 
 st.caption(
-    "ERCOT Area is currently shown as market context only and "
-    "does not directly affect the Opportunity Score."
+    f"ERCOT Location represents "
+    f"{location_market_weight * market_weight:.1%} of the total "
+    f"Opportunity Score under the current assumptions."
 )
 
 st.caption(
@@ -1105,6 +1442,17 @@ df[
     ]
     .apply(
         map_ercot_area
+    )
+)
+
+df[
+    "Location Score"
+] = (
+    df[
+        "ERCOT Area"
+    ]
+    .apply(
+        location_score
     )
 )
 
@@ -1295,7 +1643,7 @@ edited_sellers_full = st.data_editor(
 )
 
 # ============================================================
-# SAVE EDITABLE SELLER VALUES
+# SAVE SELLER ASSUMPTIONS
 # ============================================================
 
 editable_seller_columns = [
@@ -1428,7 +1776,9 @@ df[
 # SELLER MOTIVATION SCORE
 # ============================================================
 
-def distress_score(row):
+def distress_score(
+    row
+):
 
     return calculate_discount_score(
         row[
@@ -1453,7 +1803,9 @@ df[
 # ASSET QUALITY SCORE
 # ============================================================
 
-def asset_score(row):
+def asset_score(
+    row
+):
 
     status = clean_text(
         row.get(
@@ -1522,10 +1874,12 @@ df[
 )
 
 # ============================================================
-# MARKET / REVENUE SCORE
+# REVENUE VISIBILITY SCORE
 # ============================================================
 
-def market_score(row):
+def revenue_visibility_score(
+    row
+):
 
     contract = has_value(
         row.get(
@@ -1555,12 +1909,33 @@ def market_score(row):
 
 
 df[
-    "Market / Revenue"
+    "Revenue Visibility"
 ] = (
     df.apply(
-        market_score,
+        revenue_visibility_score,
         axis=1
     )
+)
+
+# ============================================================
+# MARKET / REVENUE SCORE
+#
+# 70% Revenue Visibility
+# 30% ERCOT Location
+# ============================================================
+
+df[
+    "Market / Revenue"
+] = (
+    df[
+        "Revenue Visibility"
+    ]
+    * revenue_visibility_weight
+    +
+    df[
+        "Location Score"
+    ]
+    * location_market_weight
 )
 
 # ============================================================
@@ -1575,11 +1950,14 @@ energy_columns = [
 ]
 
 
-def energy_community(row):
+def energy_community(
+    row
+):
 
     for col in energy_columns:
 
         if col not in row.index:
+
             continue
 
         value = clean_text(
@@ -1612,7 +1990,9 @@ df[
 # ACQUISITION VALUE SCORE
 # ============================================================
 
-def acquisition_value(row):
+def acquisition_value(
+    row
+):
 
     tax_credit = has_value(
         row.get(
@@ -1660,13 +2040,17 @@ as_of_date = pd.Timestamp(
 )
 
 
-def timing_score(row):
+def timing_score(
+    row
+):
 
     cod = row[
         "First Power Date"
     ]
 
-    if pd.isna(cod):
+    if pd.isna(
+        cod
+    ):
 
         return timing_missing
 
@@ -1704,7 +2088,7 @@ df[
 )
 
 # ============================================================
-# SELLER ACTIONABILITY SCORE
+# ACTIONABILITY SCORE
 # ============================================================
 
 df[
@@ -1745,7 +2129,9 @@ df[
 # DATA COMPLETENESS
 # ============================================================
 
-def completeness(row):
+def completeness(
+    row
+):
 
     score = 0
 
@@ -1857,7 +2243,9 @@ df[
 # ACTION
 # ============================================================
 
-def action(row):
+def action(
+    row
+):
 
     if pd.isna(
         row[
@@ -1929,10 +2317,12 @@ df[
 )
 
 # ============================================================
-# MANAGEMENT EXPLANATION LOGIC
+# MANAGEMENT EXPLANATION
 # ============================================================
 
-def why_it_ranks(row):
+def why_it_ranks(
+    row
+):
 
     reasons = []
 
@@ -1969,19 +2359,27 @@ def why_it_ranks(row):
         )
 
     if row[
-        "Market / Revenue"
+        "Revenue Visibility"
     ] >= 90:
 
         reasons.append(
-            "Strong visible revenue / offtaker profile"
+            "Strong revenue / offtaker visibility"
         )
 
     elif row[
-        "Market / Revenue"
+        "Revenue Visibility"
     ] >= 80:
 
         reasons.append(
             "Some contracted revenue visibility"
+        )
+
+    if row[
+        "Location Score"
+    ] >= 85:
+
+        reasons.append(
+            "Attractive ERCOT market location"
         )
 
     if row[
@@ -2029,7 +2427,9 @@ def why_it_ranks(row):
     )
 
 
-def key_risk(row):
+def key_risk(
+    row
+):
 
     risks = []
 
@@ -2068,7 +2468,7 @@ def key_risk(row):
         )
 
     if row[
-        "Market / Revenue"
+        "Revenue Visibility"
     ] <= 45:
 
         risks.append(
@@ -2076,11 +2476,19 @@ def key_risk(row):
         )
 
     elif row[
-        "Market / Revenue"
+        "Revenue Visibility"
     ] < 90:
 
         risks.append(
             "Revenue / offtaker visibility is incomplete"
+        )
+
+    if row[
+        "Location Score"
+    ] <= 50:
+
+        risks.append(
+            "Lower broad-area location score; node economics may differ"
         )
 
     if pd.isna(
@@ -2213,6 +2621,7 @@ management_columns = [
     "Owner",
     "Power Project Type",
     "ERCOT Area",
+    "Location Score",
     "Capacity (MW)",
     "Power Project Status",
     "Opportunity Score",
@@ -2252,6 +2661,12 @@ st.dataframe(
                 format="%.1f"
             ),
 
+        "Location Score":
+            st.column_config.NumberColumn(
+                "Location",
+                format="%.0f"
+            ),
+
         "Opportunity Score":
             st.column_config.ProgressColumn(
                 "Score",
@@ -2281,10 +2696,6 @@ f1, f2, f3, f4 = st.columns(
     4
 )
 
-# ------------------------------------------------------------
-# TECHNOLOGY
-# ------------------------------------------------------------
-
 technology_options = sorted(
     df[
         "Power Project Type"
@@ -2299,10 +2710,6 @@ selected_technology = f1.multiselect(
     default=technology_options
 )
 
-# ------------------------------------------------------------
-# ERCOT AREA
-# ------------------------------------------------------------
-
 ercot_area_options = sorted(
     df[
         "ERCOT Area"
@@ -2316,10 +2723,6 @@ selected_ercot_areas = f2.multiselect(
     ercot_area_options,
     default=ercot_area_options
 )
-
-# ------------------------------------------------------------
-# OWNER
-# ------------------------------------------------------------
 
 owner_options = sorted(
     [
@@ -2339,10 +2742,6 @@ selected_owners = f3.multiselect(
     owner_options
 )
 
-# ------------------------------------------------------------
-# STATUS
-# ------------------------------------------------------------
-
 status_options = sorted(
     df[
         "Power Project Status"
@@ -2356,10 +2755,6 @@ selected_status = f4.multiselect(
     status_options,
     default=status_options
 )
-
-# ------------------------------------------------------------
-# APPLY FILTERS
-# ------------------------------------------------------------
 
 filtered = df[
     df[
@@ -2416,6 +2811,7 @@ display_columns = [
     "Power Project Type",
     "ERCOT Area",
     "ISO Zone",
+    "Location Score",
     "Capacity (MW)",
     "Power Project Status",
     "First Power Date",
@@ -2423,6 +2819,7 @@ display_columns = [
     "Contract Offtaker",
     "Distress Score",
     "Asset Quality",
+    "Revenue Visibility",
     "Market / Revenue",
     "Acquisition Value",
     "Executability",
@@ -2455,6 +2852,24 @@ st.dataframe(
         "Distress Score":
             st.column_config.NumberColumn(
                 "Seller Motivation"
+            ),
+
+        "Revenue Visibility":
+            st.column_config.NumberColumn(
+                "Revenue Visibility",
+                format="%.1f"
+            ),
+
+        "Location Score":
+            st.column_config.NumberColumn(
+                "Location",
+                format="%.0f"
+            ),
+
+        "Market / Revenue":
+            st.column_config.NumberColumn(
+                "Market / Revenue",
+                format="%.1f"
             ),
 
         "Opportunity Score":
@@ -2550,6 +2965,7 @@ tech_columns = [
     "Power Project Name",
     "Owner",
     "ERCOT Area",
+    "Location Score",
     "Capacity (MW)",
     "Power Project Status",
     "First Power Date",
@@ -2557,6 +2973,7 @@ tech_columns = [
     "Contract Offtaker",
     "Distress Score",
     "Asset Quality",
+    "Revenue Visibility",
     "Market / Revenue",
     "Acquisition Value",
     "Executability",
@@ -2614,6 +3031,24 @@ st.dataframe(
                 "Seller Motivation"
             ),
 
+        "Location Score":
+            st.column_config.NumberColumn(
+                "Location",
+                format="%.0f"
+            ),
+
+        "Revenue Visibility":
+            st.column_config.NumberColumn(
+                "Revenue Visibility",
+                format="%.1f"
+            ),
+
+        "Market / Revenue":
+            st.column_config.NumberColumn(
+                "Market / Revenue",
+                format="%.1f"
+            ),
+
         "First Power Date":
             st.column_config.DateColumn(
                 "COD"
@@ -2640,9 +3075,10 @@ st.subheader(
 )
 
 st.caption(
-    "Project exposure by ERCOT market area. "
-    "Location is currently informational and is not included "
-    "in the Opportunity Score."
+    "Broad market-location screen by ERCOT area. "
+    "Location affects 30% of Market / Revenue and currently "
+    f"{location_market_weight * market_weight:.1%} of the total "
+    "Opportunity Score."
 )
 
 area_summary = (
@@ -2662,6 +3098,11 @@ area_summary = (
             "sum"
         ),
 
+        Location_Score=(
+            "Location Score",
+            "mean"
+        ),
+
         Average_Score=(
             "Opportunity Score",
             "mean"
@@ -2678,8 +3119,8 @@ area_summary = (
     area_summary
     .sort_values(
         by=[
-            "Average_Score",
-            "Best_Score"
+            "Location_Score",
+            "Average_Score"
         ],
         ascending=[
             False,
@@ -2692,6 +3133,10 @@ area_summary_display = (
     area_summary
     .rename(
         columns={
+
+            "Location_Score":
+                "Location Score",
+
             "Average_Score":
                 "Average Score",
 
@@ -2714,11 +3159,17 @@ st.dataframe(
                 format="%.0f"
             ),
 
-        "Average Score":
+        "Location Score":
             st.column_config.ProgressColumn(
-                "Average Score",
+                "Location Score",
                 min_value=0,
                 max_value=100,
+                format="%.0f"
+            ),
+
+        "Average Score":
+            st.column_config.NumberColumn(
+                "Average Score",
                 format="%.1f"
             ),
 
@@ -2969,6 +3420,7 @@ else:
                 "Power Project Name",
                 "ERCOT Area",
                 "ISO Zone",
+                "Location Score",
                 "Capacity (MW)",
                 "Power Project Type",
                 "Power Project Status",
@@ -2978,6 +3430,7 @@ else:
                 "Contract Offtaker",
                 "Distress Score",
                 "Asset Quality",
+                "Revenue Visibility",
                 "Market / Revenue",
                 "Acquisition Value",
                 "Executability",
@@ -3003,6 +3456,12 @@ else:
                     "Distress Score":
                         st.column_config.NumberColumn(
                             "Seller Motivation"
+                        ),
+
+                    "Location Score":
+                        st.column_config.NumberColumn(
+                            "Location",
+                            format="%.0f"
                         ),
 
                     "First Power Date":
@@ -3066,12 +3525,8 @@ if len(
     )
 
     p2.metric(
-        "ISO Zone",
-        clean_text(
-            project.get(
-                "ISO Zone"
-            )
-        )
+        "Location Score",
+        f"{project['Location Score']:.0f}"
     )
 
     p3.metric(
@@ -3088,6 +3543,11 @@ if len(
         )
     )
 
+    st.caption(
+        f"ISO Zone: "
+        f"{clean_text(project.get('ISO Zone'))}"
+    )
+
     if has_value(
         project.get(
             "Point of Interconnection"
@@ -3100,8 +3560,48 @@ if len(
         )
 
     # --------------------------------------------------------
-    # SCORE COMPONENTS
+    # MARKET / REVENUE DETAIL
     # --------------------------------------------------------
+
+    st.markdown(
+        "#### Market / Revenue"
+    )
+
+    m1, m2, m3 = st.columns(
+        3
+    )
+
+    m1.metric(
+        "Revenue Visibility",
+        f"{project['Revenue Visibility']:.1f}"
+    )
+
+    m2.metric(
+        "Location Score",
+        f"{project['Location Score']:.1f}"
+    )
+
+    m3.metric(
+        "Market / Revenue Score",
+        f"{project['Market / Revenue']:.1f}"
+    )
+
+    st.caption(
+        f"Market / Revenue = "
+        f"{project['Revenue Visibility']:.1f} × "
+        f"{revenue_visibility_weight:.0%} + "
+        f"{project['Location Score']:.1f} × "
+        f"{location_market_weight:.0%} = "
+        f"{project['Market / Revenue']:.1f}"
+    )
+
+    # --------------------------------------------------------
+    # OVERALL SCORE COMPONENTS
+    # --------------------------------------------------------
+
+    st.markdown(
+        "#### Opportunity Score"
+    )
 
     s1, s2, s3, s4, s5 = st.columns(
         5
