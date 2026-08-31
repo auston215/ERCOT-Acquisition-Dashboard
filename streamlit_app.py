@@ -522,6 +522,101 @@ seller_signals = pd.DataFrame(
 )
 
 # ============================================================
+# SELLER SCORE MAPPINGS
+# ============================================================
+
+discount_score_map = {
+    5: distress_5,
+    4: distress_4,
+    3: distress_3,
+    2: distress_2,
+    1: distress_1,
+}
+
+confidence_score_map = {
+    "High": confidence_high,
+    "Medium": confidence_medium,
+    "Low": confidence_low,
+}
+
+actionability_points = {
+    5: 100,
+    4: 80,
+    3: 60,
+    2: 40,
+    1: 20,
+}
+
+
+def calculate_discount_score(
+    potential,
+    confidence
+):
+
+    if pd.isna(
+        potential
+    ):
+        return distress_none
+
+    try:
+        potential = int(
+            potential
+        )
+    except:
+        return distress_none
+
+    base_score = discount_score_map.get(
+        potential,
+        distress_none
+    )
+
+    confidence_multiplier = (
+        confidence_score_map.get(
+            clean_text(
+                confidence
+            ),
+            confidence_low
+        )
+    )
+
+    return round(
+        base_score
+        * confidence_multiplier,
+        1
+    )
+
+
+def actionability_score(value):
+
+    if pd.isna(
+        value
+    ):
+        return 50
+
+    try:
+        value = int(
+            value
+        )
+    except:
+        return 50
+
+    return actionability_points.get(
+        value,
+        50
+    )
+
+
+# ============================================================
+# INITIALIZE SELLER ASSUMPTIONS
+# ============================================================
+
+if "seller_assumptions" not in st.session_state:
+
+    st.session_state[
+        "seller_assumptions"
+    ] = seller_signals.copy()
+
+# ============================================================
 # NO FILE YET
 # ============================================================
 
@@ -532,12 +627,44 @@ if uploaded_file is None:
         "using the sidebar to populate the dashboard."
     )
 
+    seller_preview = (
+        st.session_state[
+            "seller_assumptions"
+        ].copy()
+    )
+
+    seller_preview.insert(
+        2,
+        "Discount Score",
+        seller_preview.apply(
+            lambda row: calculate_discount_score(
+                row[
+                    "Discount Potential"
+                ],
+                row[
+                    "Confidence"
+                ]
+            ),
+            axis=1
+        )
+    )
+
+    seller_preview.insert(
+        4,
+        "Actionability Score",
+        seller_preview[
+            "Seller Actionability"
+        ].apply(
+            actionability_score
+        )
+    )
+
     st.subheader(
         "Seller Motivation / Actionability Assumptions"
     )
 
     st.dataframe(
-        seller_signals,
+        seller_preview,
         use_container_width=True,
         hide_index=True
     )
@@ -662,7 +789,7 @@ df = df[
 ].copy()
 
 # ============================================================
-# SELLER ASSUMPTIONS
+# SELLER MOTIVATION / ACTIONABILITY ASSUMPTIONS
 # ============================================================
 
 st.subheader(
@@ -670,18 +797,172 @@ st.subheader(
 )
 
 st.caption(
-    "Current seller-level assumptions. Edit directly as new "
-    "market intelligence becomes available."
+    "The 1–5 inputs are qualitative assumptions. "
+    "The adjacent 0–100 scores show how those assumptions "
+    "are translated into the scoring model."
 )
 
-edited_sellers = st.data_editor(
-    seller_signals,
+current_sellers = (
+    st.session_state[
+        "seller_assumptions"
+    ].copy()
+)
+
+# ------------------------------------------------------------
+# ADD DISCOUNT SCORE DIRECTLY NEXT TO DISCOUNT POTENTIAL
+# ------------------------------------------------------------
+
+current_sellers.insert(
+    2,
+    "Discount Score",
+    current_sellers.apply(
+        lambda row: calculate_discount_score(
+            row[
+                "Discount Potential"
+            ],
+            row[
+                "Confidence"
+            ]
+        ),
+        axis=1
+    )
+)
+
+# ------------------------------------------------------------
+# ADD ACTIONABILITY SCORE DIRECTLY NEXT TO ACTIONABILITY
+# ------------------------------------------------------------
+
+current_sellers.insert(
+    4,
+    "Actionability Score",
+    current_sellers[
+        "Seller Actionability"
+    ].apply(
+        actionability_score
+    )
+)
+
+# ------------------------------------------------------------
+# EDITABLE TABLE
+# ------------------------------------------------------------
+
+edited_sellers_full = st.data_editor(
+    current_sellers,
     use_container_width=True,
     hide_index=True,
-    num_rows="dynamic"
+    num_rows="dynamic",
+    key="seller_assumptions_editor",
+    disabled=[
+        "Discount Score",
+        "Actionability Score"
+    ],
+    column_order=[
+        "Owner",
+        "Discount Potential",
+        "Discount Score",
+        "Seller Actionability",
+        "Actionability Score",
+        "Confidence",
+    ],
+    column_config={
+
+        "Discount Potential":
+            st.column_config.NumberColumn(
+                "Discount Potential",
+                min_value=1,
+                max_value=5,
+                step=1,
+                format="%d"
+            ),
+
+        "Discount Score":
+            st.column_config.ProgressColumn(
+                "Discount Score",
+                min_value=0,
+                max_value=100,
+                format="%.0f"
+            ),
+
+        "Seller Actionability":
+            st.column_config.NumberColumn(
+                "Seller Actionability",
+                min_value=1,
+                max_value=5,
+                step=1,
+                format="%d"
+            ),
+
+        "Actionability Score":
+            st.column_config.ProgressColumn(
+                "Actionability Score",
+                min_value=0,
+                max_value=100,
+                format="%.0f"
+            ),
+
+        "Confidence":
+            st.column_config.SelectboxColumn(
+                "Confidence",
+                options=[
+                    "High",
+                    "Medium",
+                    "Low"
+                ]
+            ),
+    }
 )
 
-edited_sellers["Owner Key"] = (
+# ------------------------------------------------------------
+# SAVE EDITABLE VALUES
+# ------------------------------------------------------------
+
+editable_seller_columns = [
+    "Owner",
+    "Discount Potential",
+    "Seller Actionability",
+    "Confidence",
+]
+
+new_seller_assumptions = (
+    edited_sellers_full[
+        editable_seller_columns
+    ]
+    .copy()
+)
+
+old_seller_assumptions = (
+    st.session_state[
+        "seller_assumptions"
+    ][
+        editable_seller_columns
+    ]
+    .copy()
+)
+
+# Recalculate score columns immediately after an edit
+if not new_seller_assumptions.equals(
+    old_seller_assumptions
+):
+
+    st.session_state[
+        "seller_assumptions"
+    ] = new_seller_assumptions
+
+    st.rerun()
+
+edited_sellers = (
+    st.session_state[
+        "seller_assumptions"
+    ].copy()
+)
+
+# ------------------------------------------------------------
+# OWNER LOOKUP
+# ------------------------------------------------------------
+
+edited_sellers[
+    "Owner Key"
+] = (
     edited_sellers[
         "Owner"
     ]
@@ -758,50 +1039,15 @@ df["Seller Confidence"] = (
 # SELLER MOTIVATION SCORE
 # ============================================================
 
-distress_points = {
-    5: distress_5,
-    4: distress_4,
-    3: distress_3,
-    2: distress_2,
-    1: distress_1,
-}
-
-confidence_points = {
-    "High": confidence_high,
-    "Medium": confidence_medium,
-    "Low": confidence_low,
-}
-
-
 def distress_score(row):
 
-    discount = row[
-        "Discount Potential"
-    ]
-
-    if pd.isna(
-        discount
-    ):
-
-        return distress_none
-
-    base = distress_points.get(
-        int(discount),
-        distress_none
-    )
-
-    confidence = row[
-        "Seller Confidence"
-    ]
-
-    multiplier = confidence_points.get(
-        confidence,
-        confidence_low
-    )
-
-    return (
-        base
-        * multiplier
+    return calculate_discount_score(
+        row[
+            "Discount Potential"
+        ],
+        row[
+            "Seller Confidence"
+        ]
     )
 
 
@@ -1059,29 +1305,6 @@ df["Timing Score"] = (
 # ============================================================
 # SELLER ACTIONABILITY SCORE
 # ============================================================
-
-actionability_points = {
-    5: 100,
-    4: 80,
-    3: 60,
-    2: 40,
-    1: 20,
-}
-
-
-def actionability_score(value):
-
-    if pd.isna(
-        value
-    ):
-
-        return 50
-
-    return actionability_points.get(
-        int(value),
-        50
-    )
-
 
 df["Actionability Score"] = (
     df[
@@ -2071,6 +2294,10 @@ else:
         f"{bundle_summary['Bundle_MW'].sum():,.0f} MW"
     )
 
+    # --------------------------------------------------------
+    # BUNDLE SUMMARY
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Bundle Summary"
     )
@@ -2129,6 +2356,10 @@ else:
                 ),
         }
     )
+
+    # --------------------------------------------------------
+    # PROJECTS WITHIN EACH BUNDLE
+    # --------------------------------------------------------
 
     st.markdown(
         "#### Projects Within Each Bundle"
@@ -2297,6 +2528,10 @@ if len(
         "Total Opportunity Score",
         f"{project['Opportunity Score']:.2f}"
     )
+
+    # --------------------------------------------------------
+    # MANAGEMENT READOUT
+    # --------------------------------------------------------
 
     st.markdown(
         "#### Management Readout"
