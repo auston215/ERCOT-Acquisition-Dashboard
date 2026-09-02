@@ -102,13 +102,13 @@ distress_weight = st.sidebar.number_input(
     key="distress_weight"
 )
 
-asset_weight = st.sidebar.number_input(
-    "Asset Quality",
+development_weight = st.sidebar.number_input(
+    "Development Stage",
     min_value=0.0,
     max_value=1.0,
     value=0.25,
     step=0.05,
-    key="asset_weight"
+    key="development_weight"
 )
 
 market_weight = st.sidebar.number_input(
@@ -140,7 +140,7 @@ exec_weight = st.sidebar.number_input(
 
 total_weight = (
     distress_weight
-    + asset_weight
+    + development_weight
     + market_weight
     + value_weight
     + exec_weight
@@ -232,65 +232,65 @@ with st.sidebar.expander(
     )
 
 # ------------------------------------------------------------
-# ASSET QUALITY
+# DEVELOPMENT STAGE
 # ------------------------------------------------------------
 
 with st.sidebar.expander(
-    "Asset Quality Points"
+    "Development Stage Points"
 ):
 
-    asset_operating = st.number_input(
+    development_operating = st.number_input(
         "Operating",
         value=100,
-        key="asset_operating"
+        key="development_operating"
     )
 
-    asset_50 = st.number_input(
+    development_50 = st.number_input(
         ">50% Construction",
         value=92,
-        key="asset_50"
+        key="development_50"
     )
 
-    asset_construction = st.number_input(
+    development_construction = st.number_input(
         "In Construction",
         value=85,
-        key="asset_construction"
+        key="development_construction"
     )
 
-    asset_ia = st.number_input(
+    development_ia = st.number_input(
         "IA Executed",
         value=75,
-        key="asset_ia"
+        key="development_ia"
     )
 
-    asset_fis_complete = st.number_input(
+    development_fis_complete = st.number_input(
         "FIS Completed",
         value=65,
-        key="asset_fis_complete"
+        key="development_fis_complete"
     )
 
-    asset_fis_started = st.number_input(
+    development_fis_started = st.number_input(
         "FIS Started",
         value=55,
-        key="asset_fis_started"
+        key="development_fis_started"
     )
 
-    asset_studies = st.number_input(
+    development_studies = st.number_input(
         "Studies Undergoing",
         value=45,
-        key="asset_studies"
+        key="development_studies"
     )
 
-    asset_pre = st.number_input(
+    development_pre = st.number_input(
         "Pre-Study",
         value=35,
-        key="asset_pre"
+        key="development_pre"
     )
 
-    asset_inactive = st.number_input(
+    development_inactive = st.number_input(
         "Inactive / Suspended / Retired",
         value=15,
-        key="asset_inactive"
+        key="development_inactive"
     )
 
 # ------------------------------------------------------------
@@ -512,19 +512,19 @@ with st.sidebar.expander(
         key="timing_exec_weight"
     )
 
-    asset_exec_weight = st.number_input(
-        "Asset Quality %",
+    development_exec_weight = st.number_input(
+        "Development Stage %",
         min_value=0.0,
         max_value=1.0,
         value=0.20,
         step=0.05,
-        key="asset_exec_weight"
+        key="development_exec_weight"
     )
 
 exec_mix_total = (
     actionability_weight
     + timing_exec_weight
-    + asset_exec_weight
+    + development_exec_weight
 )
 
 if abs(
@@ -657,10 +657,6 @@ guide_left, guide_right = st.columns(
     [1.55, 1]
 )
 
-# ------------------------------------------------------------
-# LEFT — SCORE
-# ------------------------------------------------------------
-
 with guide_left:
 
     st.markdown(
@@ -676,7 +672,7 @@ with guide_left:
         {
             "Factor": [
                 "Seller Motivation",
-                "Asset Quality",
+                "Development Stage",
                 "Market / Revenue",
                 "Acquisition Value",
                 "Executability",
@@ -684,7 +680,7 @@ with guide_left:
 
             "Weight": [
                 f"{distress_weight:.0%}",
-                f"{asset_weight:.0%}",
+                f"{development_weight:.0%}",
                 f"{market_weight:.0%}",
                 f"{value_weight:.0%}",
                 f"{exec_weight:.0%}",
@@ -692,7 +688,7 @@ with guide_left:
 
             "What It Measures": [
                 "Likelihood owner is motivated to transact",
-                "Project maturity / operating status",
+                "Project maturity and progress through development",
                 "Revenue visibility + ERCOT location",
                 "Tax-credit / Energy Community attributes",
                 "Ability to realistically execute a transaction",
@@ -706,10 +702,6 @@ with guide_left:
         hide_index=True
     )
 
-    # --------------------------------------------------------
-    # MAIN FORMULA
-    # --------------------------------------------------------
-
     st.markdown(
         "#### Formula"
     )
@@ -717,7 +709,7 @@ with guide_left:
     st.markdown(
         f"""
         **Opportunity Score = Seller Motivation × {distress_weight:.0%}
-        + Asset Quality × {asset_weight:.0%}
+        + Development Stage × {development_weight:.0%}
         + Market / Revenue × {market_weight:.0%}
         + Acquisition Value × {value_weight:.0%}
         + Executability × {exec_weight:.0%}**
@@ -733,8 +725,8 @@ with guide_left:
     st.caption(
         f"Executability = Seller Actionability × "
         f"{actionability_weight:.0%} + Timing × "
-        f"{timing_exec_weight:.0%} + Asset Quality × "
-        f"{asset_exec_weight:.0%}."
+        f"{timing_exec_weight:.0%} + Development Stage × "
+        f"{development_exec_weight:.0%}."
     )
 
     # --------------------------------------------------------
@@ -746,8 +738,8 @@ with guide_left:
         * confidence_high
     )
 
-    example_asset = (
-        asset_operating
+    example_development = (
+        development_operating
     )
 
     example_revenue = (
@@ -783,16 +775,16 @@ with guide_left:
         example_timing
         * timing_exec_weight
         +
-        example_asset
-        * asset_exec_weight
+        example_development
+        * development_exec_weight
     )
 
     example_final = (
         example_seller
         * distress_weight
         +
-        example_asset
-        * asset_weight
+        example_development
+        * development_weight
         +
         example_market
         * market_weight
@@ -812,7 +804,7 @@ with guide_left:
         {
             "Factor": [
                 "Seller Motivation",
-                "Asset Quality",
+                "Development Stage",
                 "Market / Revenue",
                 "Acquisition Value",
                 "Executability",
@@ -820,7 +812,7 @@ with guide_left:
 
             "Score": [
                 example_seller,
-                example_asset,
+                example_development,
                 example_market,
                 example_value,
                 example_executability,
@@ -834,7 +826,7 @@ with guide_left:
                 ),
 
                 (
-                    "Operating asset = 100"
+                    "Operating project = 100"
                 ),
 
                 (
@@ -857,8 +849,8 @@ with guide_left:
                     f"{actionability_weight:.0%} + "
                     f"Timing 100 × "
                     f"{timing_exec_weight:.0%} + "
-                    f"Asset 100 × "
-                    f"{asset_exec_weight:.0%} = "
+                    f"Development Stage 100 × "
+                    f"{development_exec_weight:.0%} = "
                     f"{example_executability:.0f}"
                 ),
             ],
@@ -874,16 +866,12 @@ with guide_left:
     st.success(
         f"Example Score = "
         f"({example_seller:.0f} × {distress_weight:.0%}) + "
-        f"({example_asset:.0f} × {asset_weight:.0%}) + "
+        f"({example_development:.0f} × {development_weight:.0%}) + "
         f"({example_market:.1f} × {market_weight:.0%}) + "
         f"({example_value:.0f} × {value_weight:.0%}) + "
         f"({example_executability:.0f} × {exec_weight:.0%}) "
         f"= {example_final:.1f}"
     )
-
-# ------------------------------------------------------------
-# RIGHT — HOW TO USE
-# ------------------------------------------------------------
 
 with guide_right:
 
@@ -1025,14 +1013,19 @@ with st.expander(
     )
 
     # --------------------------------------------------------
-    # ASSET QUALITY
+    # DEVELOPMENT STAGE
     # --------------------------------------------------------
 
     st.markdown(
-        "#### Asset Quality"
+        "#### Development Stage"
     )
 
-    asset_logic = pd.DataFrame(
+    st.caption(
+        "Measures how far the project has progressed through "
+        "development, interconnection and construction."
+    )
+
+    development_logic = pd.DataFrame(
         {
             "Stage": [
                 "Operating / Construction Complete",
@@ -1047,21 +1040,21 @@ with st.expander(
             ],
 
             "Score": [
-                asset_operating,
-                asset_50,
-                asset_construction,
-                asset_ia,
-                asset_fis_complete,
-                asset_fis_started,
-                asset_studies,
-                asset_pre,
-                asset_inactive,
+                development_operating,
+                development_50,
+                development_construction,
+                development_ia,
+                development_fis_complete,
+                development_fis_started,
+                development_studies,
+                development_pre,
+                development_inactive,
             ],
         }
     )
 
     st.dataframe(
-        asset_logic,
+        development_logic,
         use_container_width=True,
         hide_index=True
     )
@@ -1199,8 +1192,8 @@ with st.expander(
     st.caption(
         f"Executability = Seller Actionability × "
         f"{actionability_weight:.0%} + Timing × "
-        f"{timing_exec_weight:.0%} + Asset Quality × "
-        f"{asset_exec_weight:.0%}."
+        f"{timing_exec_weight:.0%} + Development Stage × "
+        f"{development_exec_weight:.0%}."
     )
 
     actionability_logic = pd.DataFrame(
@@ -1802,10 +1795,10 @@ df[
 )
 
 # ============================================================
-# ASSET QUALITY SCORE
+# DEVELOPMENT STAGE SCORE
 # ============================================================
 
-def asset_score(
+def development_stage_score(
     row
 ):
 
@@ -1826,34 +1819,34 @@ def asset_score(
         or detailed == "Construction Complete"
     ):
 
-        return asset_operating
+        return development_operating
 
     if "More Than 50%" in detailed:
 
-        return asset_50
+        return development_50
 
     if status == "In Construction":
 
-        return asset_construction
+        return development_construction
 
     if (
         status == "IA Executed"
         or ", IA" in detailed
     ):
 
-        return asset_ia
+        return development_ia
 
     if "FIS Completed" in detailed:
 
-        return asset_fis_complete
+        return development_fis_complete
 
     if "FIS Started" in detailed:
 
-        return asset_fis_started
+        return development_fis_started
 
     if status == "Pre-Study":
 
-        return asset_pre
+        return development_pre
 
     if status in [
         "Inactive",
@@ -1861,16 +1854,16 @@ def asset_score(
         "Retired"
     ]:
 
-        return asset_inactive
+        return development_inactive
 
-    return asset_studies
+    return development_studies
 
 
 df[
-    "Asset Quality"
+    "Development Stage"
 ] = (
     df.apply(
-        asset_score,
+        development_stage_score,
         axis=1
     )
 )
@@ -2121,9 +2114,9 @@ df[
     * timing_exec_weight
     +
     df[
-        "Asset Quality"
+        "Development Stage"
     ]
-    * asset_exec_weight
+    * development_exec_weight
 )
 
 # ============================================================
@@ -2209,9 +2202,9 @@ df[
     * distress_weight
     +
     df[
-        "Asset Quality"
+        "Development Stage"
     ]
-    * asset_weight
+    * development_weight
     +
     df[
         "Market / Revenue"
@@ -2344,19 +2337,19 @@ def why_it_ranks(
         )
 
     if row[
-        "Asset Quality"
+        "Development Stage"
     ] >= 95:
 
         reasons.append(
-            "Operating / highly mature asset"
+            "Operating / highly mature project"
         )
 
     elif row[
-        "Asset Quality"
+        "Development Stage"
     ] >= 80:
 
         reasons.append(
-            "Advanced-stage project"
+            "Advanced development stage"
         )
 
     if row[
@@ -2453,7 +2446,7 @@ def key_risk(
         )
 
     if row[
-        "Asset Quality"
+        "Development Stage"
     ] < 55:
 
         risks.append(
@@ -2461,7 +2454,7 @@ def key_risk(
         )
 
     elif row[
-        "Asset Quality"
+        "Development Stage"
     ] < 75:
 
         risks.append(
@@ -2819,7 +2812,7 @@ display_columns = [
     "Contract Type",
     "Contract Offtaker",
     "Distress Score",
-    "Asset Quality",
+    "Development Stage",
     "Revenue Visibility",
     "Market / Revenue",
     "Acquisition Value",
@@ -2853,6 +2846,12 @@ st.dataframe(
         "Distress Score":
             st.column_config.NumberColumn(
                 "Seller Motivation"
+            ),
+
+        "Development Stage":
+            st.column_config.NumberColumn(
+                "Development Stage",
+                format="%.1f"
             ),
 
         "Revenue Visibility":
@@ -2973,7 +2972,7 @@ tech_columns = [
     "Contract Type",
     "Contract Offtaker",
     "Distress Score",
-    "Asset Quality",
+    "Development Stage",
     "Revenue Visibility",
     "Market / Revenue",
     "Acquisition Value",
@@ -3030,6 +3029,12 @@ st.dataframe(
         "Distress Score":
             st.column_config.NumberColumn(
                 "Seller Motivation"
+            ),
+
+        "Development Stage":
+            st.column_config.NumberColumn(
+                "Development Stage",
+                format="%.1f"
             ),
 
         "Location Score":
@@ -3430,7 +3435,7 @@ else:
                 "Contract Type",
                 "Contract Offtaker",
                 "Distress Score",
-                "Asset Quality",
+                "Development Stage",
                 "Revenue Visibility",
                 "Market / Revenue",
                 "Acquisition Value",
@@ -3457,6 +3462,12 @@ else:
                     "Distress Score":
                         st.column_config.NumberColumn(
                             "Seller Motivation"
+                        ),
+
+                    "Development Stage":
+                        st.column_config.NumberColumn(
+                            "Development Stage",
+                            format="%.1f"
                         ),
 
                     "Location Score":
@@ -3512,8 +3523,6 @@ if len(
 
     # --------------------------------------------------------
     # PROJECT CONTEXT
-    #
-    # NEW: COD ADDED DIRECTLY TO THE PROJECT BREAKDOWN
     # --------------------------------------------------------
 
     p1, p2, p3, p4, p5 = st.columns(
@@ -3625,8 +3634,8 @@ if len(
     )
 
     s2.metric(
-        "Asset Quality",
-        f"{project['Asset Quality']:.1f}"
+        "Development Stage",
+        f"{project['Development Stage']:.1f}"
     )
 
     s3.metric(
@@ -3672,8 +3681,8 @@ if len(
     )
 
     e3.metric(
-        "Asset Quality",
-        f"{project['Asset Quality']:.1f}"
+        "Development Stage",
+        f"{project['Development Stage']:.1f}"
     )
 
     e4.metric(
@@ -3687,8 +3696,8 @@ if len(
         f"{actionability_weight:.0%} + "
         f"{project['Timing Score']:.1f} × "
         f"{timing_exec_weight:.0%} + "
-        f"{project['Asset Quality']:.1f} × "
-        f"{asset_exec_weight:.0%} = "
+        f"{project['Development Stage']:.1f} × "
+        f"{development_exec_weight:.0%} = "
         f"{project['Executability']:.1f}"
     )
 
