@@ -32,11 +32,7 @@ st.caption(
 
 
 # ============================================================
-# OPTIONAL SELLER INTELLIGENCE SETTINGS
-#
-# IMPORTANT:
-# This information DOES NOT feed the score.
-# It is informational only.
+# SETTINGS
 # ============================================================
 
 SELLER_REFRESH_SECONDS = 6 * 60 * 60
@@ -167,8 +163,6 @@ st.sidebar.divider()
 
 # ============================================================
 # SIDEBAR — OPPORTUNITY SCORE WEIGHTS
-#
-# ORIGINAL SCORING
 # ============================================================
 
 st.sidebar.header(
@@ -507,7 +501,8 @@ if abs(
 # ------------------------------------------------------------
 # ACQUISITION VALUE
 #
-# RESTORED TO PREVIOUS SCORING
+# Previous scoring preserved so rankings remain comparable.
+# Domestic Content is NOT automatically scored.
 # ------------------------------------------------------------
 
 with st.sidebar.expander(
@@ -854,7 +849,7 @@ with guide_left:
 
                 "Revenue visibility + ERCOT location",
 
-                "Tax-credit / Energy Community attributes",
+                "Tax-credit / siting attributes",
 
                 "Ability to realistically execute a transaction",
             ],
@@ -1022,8 +1017,7 @@ with guide_left:
                 ),
 
                 (
-                    f"Contract + named offtaker = "
-                    f"{example_revenue:.0f}; "
+                    f"Revenue visibility = {example_revenue:.0f}; "
                     f"ERCOT-N = {example_location:.0f}"
                 ),
 
@@ -1142,14 +1136,17 @@ with st.expander(
     expanded=False
 ):
 
+    # --------------------------------------------------------
+    # SELLER MOTIVATION
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Seller Motivation"
     )
 
     st.caption(
-        "Discount Potential measures the strength of the seller "
-        "motivation / transaction opportunity. The base score is "
-        "then adjusted by confidence."
+        "Measures the strength of the seller-side reason to transact. "
+        "The base motivation score is adjusted for confidence."
     )
 
     seller_logic = pd.DataFrame(
@@ -1193,7 +1190,6 @@ with st.expander(
         hide_index=True
     )
 
-
     confidence_logic = pd.DataFrame(
         {
 
@@ -1224,13 +1220,17 @@ with st.expander(
     )
 
 
+    # --------------------------------------------------------
+    # DEVELOPMENT STAGE
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Development Stage"
     )
 
     st.caption(
         "Measures how far the project has progressed through "
-        "development, interconnection and construction."
+        "interconnection, development, construction and operations."
     )
 
     development_logic = pd.DataFrame(
@@ -1287,6 +1287,10 @@ with st.expander(
     )
 
 
+    # --------------------------------------------------------
+    # MARKET / REVENUE
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Market / Revenue"
     )
@@ -1330,7 +1334,6 @@ with st.expander(
         hide_index=True
     )
 
-
     location_logic = pd.DataFrame(
         {
 
@@ -1373,6 +1376,10 @@ with st.expander(
     )
 
 
+    # --------------------------------------------------------
+    # ACQUISITION VALUE
+    # --------------------------------------------------------
+
     st.markdown(
         "#### Acquisition Value"
     )
@@ -1410,6 +1417,17 @@ with st.expander(
         hide_index=True
     )
 
+    st.caption(
+        "Domestic Content is not included in the automated score because "
+        "Orennia does not currently expose project-level Domestic Content "
+        "qualification or bonus fields. Equipment information can be used "
+        "as a diligence reference but is not treated as evidence of qualification."
+    )
+
+
+    # --------------------------------------------------------
+    # EXECUTABILITY
+    # --------------------------------------------------------
 
     st.markdown(
         "#### Executability"
@@ -1658,6 +1676,35 @@ df[
 
 
 # ============================================================
+# OPTIONAL ORENNIA EQUIPMENT / DILIGENCE FIELDS
+#
+# These may be present in a future export.
+# They do NOT affect scoring.
+# ============================================================
+
+optional_diligence_columns = [
+
+    "Equipment Manufacturer",
+
+    "Equipment Model",
+
+    "EPC",
+
+    "Integrator",
+]
+
+
+available_diligence_columns = [
+
+    col
+
+    for col in optional_diligence_columns
+
+    if col in df.columns
+]
+
+
+# ============================================================
 # ERCOT AREA
 # ============================================================
 
@@ -1770,7 +1817,7 @@ df = df[
 # ============================================================
 # SELLER MOTIVATION / ACTIONABILITY ASSUMPTIONS
 #
-# THIS IS THE ACTUAL SCORING INPUT.
+# THIS TABLE DRIVES THE SCORE.
 # ============================================================
 
 st.subheader(
@@ -1779,8 +1826,8 @@ st.subheader(
 
 st.caption(
     "These assumptions drive the project rankings. "
-    "The automated public intelligence below is informational only "
-    "and does not change the score."
+    "Public seller intelligence below is informational only "
+    "and does not automatically change project scores."
 )
 
 
@@ -1982,10 +2029,10 @@ seller_lookup = (
 
 
 # ============================================================
-# OPTIONAL AUTOMATED SELLER INTELLIGENCE
+# PUBLIC SELLER INTELLIGENCE
 #
-# DISPLAY ONLY.
-# DOES NOT FEED THE SCORE.
+# INFORMATIONAL ONLY.
+# IT DOES NOT CHANGE SCORING.
 # ============================================================
 
 SELLER_SEARCH_TERMS = {
@@ -2392,6 +2439,7 @@ def build_advisory_seller_intelligence():
             )
 
             if rule is None:
+
                 continue
 
             classified_articles.append(
@@ -2418,24 +2466,33 @@ def build_advisory_seller_intelligence():
 
         if classified_articles:
 
+            def safe_sort_date(article):
+
+                published = article.get(
+                    "Published"
+                )
+
+                if pd.isna(
+                    published
+                ):
+
+                    return pd.Timestamp.min
+
+                timestamp = pd.Timestamp(
+                    published
+                )
+
+                if timestamp.tzinfo is not None:
+
+                    timestamp = timestamp.tz_localize(
+                        None
+                    )
+
+                return timestamp
+
             classified_articles = sorted(
                 classified_articles,
-                key=lambda x:
-                    (
-                        pd.Timestamp.min
-                        if pd.isna(
-                            x[
-                                "Published"
-                            ]
-                        )
-                        else pd.Timestamp(
-                            x[
-                                "Published"
-                            ]
-                        ).tz_localize(
-                            None
-                        )
-                    ),
+                key=safe_sort_date,
                 reverse=True
             )
 
@@ -2548,9 +2605,10 @@ with st.expander(
 ):
 
     st.caption(
-        "This feed looks for recent public seller signals and provides "
-        "a suggested score direction. It does NOT change the assumptions "
-        "above or affect project rankings."
+        "This feed monitors recent public seller signals and provides "
+        "a suggested direction for review. It does NOT change the "
+        "Seller Motivation or Actionability assumptions above and "
+        "therefore does not automatically alter project rankings."
     )
 
     refresh_intelligence = st.button(
@@ -2620,7 +2678,7 @@ st.divider()
 # ============================================================
 # MAP SELLER ASSUMPTIONS TO PROJECTS
 #
-# ONLY THE EDITABLE ASSUMPTIONS TABLE ABOVE IS USED.
+# ONLY THE MANUAL / APPROVED ASSUMPTIONS ABOVE DRIVE SCORES.
 # ============================================================
 
 def get_seller_value(
@@ -2740,7 +2798,10 @@ def development_stage_score(
 
         return development_operating
 
-    if "More Than 50%" in detailed:
+    if (
+        "More Than 50%" in detailed
+        or ">50%" in detailed
+    ):
 
         return development_50
 
@@ -2852,9 +2913,9 @@ df[
 
 
 # ============================================================
-# ENERGY COMMUNITY
+# ENERGY COMMUNITY / LOCATION-BASED BONUS SCREEN
 #
-# ORIGINAL LOGIC RESTORED
+# Existing logic preserved for ranking consistency.
 # ============================================================
 
 energy_columns = [
@@ -2907,7 +2968,10 @@ df[
 # ============================================================
 # ACQUISITION VALUE
 #
-# ORIGINAL 75 / 70 / 60 / 55 LOGIC
+# EXISTING 75 / 70 / 60 / 55 SCORING PRESERVED.
+#
+# Domestic Content is NOT inferred from equipment manufacturer,
+# EPC, model or integrator.
 # ============================================================
 
 def acquisition_value(
@@ -2948,6 +3012,17 @@ df[
     acquisition_value,
     axis=1
 )
+
+
+# ============================================================
+# DOMESTIC CONTENT REVIEW
+#
+# NO AUTOMATIC QUALIFICATION.
+# ============================================================
+
+df[
+    "Domestic Content Review"
+] = "Unknown / Diligence Required"
 
 
 # ============================================================
@@ -3120,8 +3195,6 @@ df[
 
 # ============================================================
 # OPPORTUNITY SCORE
-#
-# ORIGINAL SCORING FORMULA
 # ============================================================
 
 df[
@@ -4548,7 +4621,8 @@ if len(
         "Select a Project",
         filtered[
             "Power Project Name"
-        ].tolist()
+        ].tolist(),
+        key="score_breakdown_project"
     )
 
 
@@ -4672,7 +4746,7 @@ if len(
 
 
     # --------------------------------------------------------
-    # OVERALL SCORE COMPONENTS
+    # OPPORTUNITY SCORE COMPONENTS
     # --------------------------------------------------------
 
     st.markdown(
@@ -4769,6 +4843,106 @@ if len(
         f"{development_exec_weight:.0%} = "
         f"{project['Executability']:.1f}"
     )
+
+
+    # --------------------------------------------------------
+    # TAX CREDIT / DOMESTIC CONTENT REVIEW
+    # --------------------------------------------------------
+
+    st.markdown(
+        "#### Tax Credit / Domestic Content Review"
+    )
+
+
+    tax1, tax2, tax3 = st.columns(
+        3
+    )
+
+
+    tax1.metric(
+        "PTC / ITC",
+        clean_text(
+            project.get(
+                "PTC/ITC"
+            )
+        )
+        or "Not Identified"
+    )
+
+
+    tax2.metric(
+        "Energy Community Screen",
+        project[
+            "Energy Community"
+        ]
+    )
+
+
+    tax3.metric(
+        "Domestic Content",
+        project[
+            "Domestic Content Review"
+        ]
+    )
+
+
+    st.caption(
+        "Domestic Content is not automatically scored. Orennia does not "
+        "currently provide a native project-level Domestic Content "
+        "qualification field, so qualification requires project-specific "
+        "diligence."
+    )
+
+
+    # --------------------------------------------------------
+    # OPTIONAL EQUIPMENT / EPC DILIGENCE
+    # --------------------------------------------------------
+
+    if available_diligence_columns:
+
+        with st.expander(
+            "🏗️ Equipment / EPC Diligence",
+            expanded=False
+        ):
+
+            diligence_data = {
+
+                col:
+                    clean_text(
+                        project.get(
+                            col
+                        )
+                    )
+                    or "N/A"
+
+                for col in available_diligence_columns
+            }
+
+            diligence_df = pd.DataFrame(
+                {
+                    "Field":
+                        list(
+                            diligence_data.keys()
+                        ),
+
+                    "Value":
+                        list(
+                            diligence_data.values()
+                        )
+                }
+            )
+
+            st.dataframe(
+                diligence_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.caption(
+                "Equipment manufacturer, model, EPC and integrator data "
+                "may help prioritize Domestic Content diligence but are "
+                "not treated as proof of Domestic Content qualification."
+            )
 
 
     # --------------------------------------------------------
