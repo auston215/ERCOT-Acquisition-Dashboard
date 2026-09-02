@@ -32,7 +32,11 @@ st.caption(
 
 
 # ============================================================
-# SELLER INTELLIGENCE SETTINGS
+# OPTIONAL SELLER INTELLIGENCE SETTINGS
+#
+# IMPORTANT:
+# This information DOES NOT feed the score.
+# It is informational only.
 # ============================================================
 
 SELLER_REFRESH_SECONDS = 6 * 60 * 60
@@ -84,15 +88,12 @@ def format_date(value):
 def strip_html(value):
 
     if value is None:
-
         return ""
 
     text = re.sub(
         r"<[^>]+>",
         " ",
-        str(
-            value
-        )
+        str(value)
     )
 
     text = html_lib.unescape(
@@ -149,896 +150,6 @@ def map_ercot_area(value):
 
 
 # ============================================================
-# PUBLIC SELLER INTELLIGENCE
-# ============================================================
-
-SELLER_SIGNAL_TERMS = (
-
-    '"strategic review" OR '
-    '"strategic alternatives" OR '
-    '"asset sale" OR '
-    '"portfolio sale" OR '
-    '"sale process" OR '
-    'divest OR '
-    'divestiture OR '
-    '"capital recycling" OR '
-    'monetization OR '
-    '"sell-down" OR '
-    '"stake sale" OR '
-    'bankruptcy OR '
-    'restructuring OR '
-    'default OR '
-    'distress OR '
-    'liquidity OR '
-    '"going concern" OR '
-    'layoffs OR '
-    '"job cuts" OR '
-    '"workforce reduction" OR '
-    '"project cancellation" OR '
-    '"funding gap"'
-)
-
-
-@st.cache_data(
-    ttl=SELLER_REFRESH_SECONDS,
-    show_spinner=False
-)
-def fetch_company_news(search_term):
-
-    query = (
-
-        f'"{search_term}" '
-        f'({SELLER_SIGNAL_TERMS}) '
-        f'when:{SELLER_LOOKBACK_DAYS}d'
-    )
-
-    encoded_query = urllib.parse.quote_plus(
-        query
-    )
-
-    url = (
-
-        "https://news.google.com/rss/search?"
-        f"q={encoded_query}"
-        "&hl=en-US"
-        "&gl=US"
-        "&ceid=US:en"
-    )
-
-    request = urllib.request.Request(
-
-        url,
-
-        headers={
-
-            "User-Agent":
-                "Mozilla/5.0 ERCOT-Acquisition-Dashboard"
-        }
-    )
-
-    articles = []
-
-    try:
-
-        with urllib.request.urlopen(
-            request,
-            timeout=10
-        ) as response:
-
-            xml_data = response.read()
-
-        root = ET.fromstring(
-            xml_data
-        )
-
-        for item in root.findall(
-            ".//item"
-        ):
-
-            title = clean_text(
-                item.findtext(
-                    "title"
-                )
-            )
-
-            link = clean_text(
-                item.findtext(
-                    "link"
-                )
-            )
-
-            description = strip_html(
-                item.findtext(
-                    "description"
-                )
-            )
-
-            source = clean_text(
-                item.findtext(
-                    "source"
-                )
-            )
-
-            published_raw = clean_text(
-                item.findtext(
-                    "pubDate"
-                )
-            )
-
-            published = pd.NaT
-
-            if published_raw:
-
-                try:
-
-                    parsed = parsedate_to_datetime(
-                        published_raw
-                    )
-
-                    if parsed.tzinfo is None:
-
-                        parsed = parsed.replace(
-                            tzinfo=timezone.utc
-                        )
-
-                    published = pd.Timestamp(
-                        parsed.astimezone(
-                            timezone.utc
-                        )
-                    )
-
-                except Exception:
-
-                    published = pd.NaT
-
-            articles.append(
-                {
-
-                    "Title":
-                        title,
-
-                    "Description":
-                        description,
-
-                    "Source":
-                        source,
-
-                    "Published":
-                        published,
-
-                    "URL":
-                        link,
-                }
-            )
-
-    except Exception:
-
-        return []
-
-    return articles
-
-
-# ============================================================
-# SELLER SIGNAL CLASSIFICATION
-# ============================================================
-
-SELLER_SIGNAL_RULES = [
-
-    {
-
-        "Signal Type":
-            "Formal Sale / Strategic Review",
-
-        "Keywords": [
-
-            "strategic review",
-            "strategic alternatives",
-            "sale process",
-            "portfolio sale",
-            "asset sale",
-            "exploring a sale",
-            "retained advisor",
-            "retains advisor",
-            "divestiture",
-            "divest",
-        ],
-
-        "Discount Potential":
-            5,
-
-        "Seller Actionability":
-            5,
-
-        "Strength":
-            5,
-    },
-
-    {
-
-        "Signal Type":
-            "Restructuring / Severe Financial Stress",
-
-        "Keywords": [
-
-            "bankruptcy",
-            "chapter 11",
-            "restructuring",
-            "debt restructuring",
-            "default",
-            "covenant breach",
-            "distressed",
-            "insolvency",
-            "going concern",
-            "liquidity crisis",
-        ],
-
-        "Discount Potential":
-            5,
-
-        "Seller Actionability":
-            4,
-
-        "Strength":
-            5,
-    },
-
-    {
-
-        "Signal Type":
-            "Capital Recycling / Monetization",
-
-        "Keywords": [
-
-            "capital recycling",
-            "asset monetization",
-            "monetization",
-            "sell-down",
-            "sell down",
-            "stake sale",
-            "asset rotation",
-        ],
-
-        "Discount Potential":
-            4,
-
-        "Seller Actionability":
-            5,
-
-        "Strength":
-            4,
-    },
-
-    {
-
-        "Signal Type":
-            "Layoffs / Cost Reduction",
-
-        "Keywords": [
-
-            "layoffs",
-            "layoff",
-            "job cuts",
-            "workforce reduction",
-            "workforce reductions",
-            "headcount reduction",
-            "cost reduction",
-        ],
-
-        "Discount Potential":
-            4,
-
-        "Seller Actionability":
-            3,
-
-        "Strength":
-            3,
-    },
-
-    {
-
-        "Signal Type":
-            "Project Cancellation / Portfolio Pressure",
-
-        "Keywords": [
-
-            "project cancellation",
-            "project cancellations",
-            "cancels project",
-            "cancelled project",
-            "canceled project",
-            "withdraws project",
-            "project withdrawal",
-            "project impairment",
-            "impairment charge",
-            "write-down",
-            "writedown",
-        ],
-
-        "Discount Potential":
-            4,
-
-        "Seller Actionability":
-            3,
-
-        "Strength":
-            4,
-    },
-
-    {
-
-        "Signal Type":
-            "Funding / Liquidity Need",
-
-        "Keywords": [
-
-            "funding gap",
-            "needs financing",
-            "seeks financing",
-            "seeking financing",
-            "liquidity pressure",
-            "liquidity concerns",
-            "capital need",
-            "needs capital",
-        ],
-
-        "Discount Potential":
-            4,
-
-        "Seller Actionability":
-            3,
-
-        "Strength":
-            3,
-    },
-]
-
-
-TRUSTED_SOURCE_KEYWORDS = [
-
-    "reuters",
-    "bloomberg",
-    "financial times",
-    "wall street journal",
-    "s&p global",
-    "fitch",
-    "moody",
-    "sec",
-    "utility dive",
-    "renewable energy world",
-]
-
-
-def classify_seller_article(
-    title,
-    description
-):
-
-    text = (
-
-        clean_text(
-            title
-        )
-
-        + " "
-
-        + clean_text(
-            description
-        )
-
-    ).lower()
-
-    matches = []
-
-    for rule in SELLER_SIGNAL_RULES:
-
-        for keyword in rule[
-            "Keywords"
-        ]:
-
-            if keyword.lower() in text:
-
-                matches.append(
-                    rule
-                )
-
-                break
-
-    if not matches:
-
-        return None
-
-    matches = sorted(
-
-        matches,
-
-        key=lambda x:
-            x[
-                "Strength"
-            ],
-
-        reverse=True
-    )
-
-    return matches[
-        0
-    ]
-
-
-def recency_multiplier(
-    published
-):
-
-    if pd.isna(
-        published
-    ):
-
-        return 0.50
-
-    now = pd.Timestamp.now(
-        tz="UTC"
-    )
-
-    published = pd.Timestamp(
-        published
-    )
-
-    if published.tzinfo is None:
-
-        published = published.tz_localize(
-            "UTC"
-        )
-
-    days_old = max(
-
-        0,
-
-        (
-            now
-            - published
-        ).days
-    )
-
-    if days_old <= 7:
-
-        return 1.00
-
-    if days_old <= 30:
-
-        return 0.90
-
-    if days_old <= 90:
-
-        return 0.75
-
-    if days_old <= 180:
-
-        return 0.55
-
-    return 0.25
-
-
-def trusted_source(
-    source
-):
-
-    source_lower = clean_text(
-        source
-    ).lower()
-
-    return any(
-
-        keyword in source_lower
-
-        for keyword in TRUSTED_SOURCE_KEYWORDS
-    )
-
-
-def derive_confidence(
-    classified_articles
-):
-
-    if not classified_articles:
-
-        return "Low"
-
-    top = classified_articles[
-        0
-    ]
-
-    top_date = top.get(
-        "Published"
-    )
-
-    recent_30 = False
-
-    if not pd.isna(
-        top_date
-    ):
-
-        published = pd.Timestamp(
-            top_date
-        )
-
-        if published.tzinfo is None:
-
-            published = published.tz_localize(
-                "UTC"
-            )
-
-        age = (
-
-            pd.Timestamp.now(
-                tz="UTC"
-            )
-
-            - published
-
-        ).days
-
-        recent_30 = (
-            age <= 30
-        )
-
-    number_of_signals = len(
-        classified_articles
-    )
-
-    if (
-        trusted_source(
-            top.get(
-                "Source"
-            )
-        )
-        and recent_30
-    ):
-
-        return "High"
-
-    if (
-        number_of_signals >= 2
-        and recent_30
-    ):
-
-        return "High"
-
-    if number_of_signals >= 1:
-
-        return "Medium"
-
-    return "Low"
-
-
-# ============================================================
-# BASELINE SELLER ASSUMPTIONS
-# ============================================================
-
-seller_baselines = pd.DataFrame(
-    [
-
-        [
-            "Birch Creek Energy",
-            "Birch Creek Energy",
-            5,
-            5,
-            "Medium"
-        ],
-
-        [
-            "Birch Creek Development",
-            "Birch Creek Energy",
-            5,
-            5,
-            "Medium"
-        ],
-
-        [
-            "esVolta",
-            "esVolta",
-            4,
-            5,
-            "High"
-        ],
-
-        [
-            "Key Capture Energy",
-            "Key Capture Energy",
-            4,
-            5,
-            "High"
-        ],
-
-        [
-            "Lightsource BP",
-            "Lightsource bp",
-            3,
-            4,
-            "High"
-        ],
-
-        [
-            "Ørsted U.S. Onshore",
-            "Orsted U.S. Onshore",
-            3,
-            4,
-            "Medium"
-        ],
-
-        [
-            "Orsted",
-            "Orsted U.S. renewables",
-            3,
-            4,
-            "Medium"
-        ],
-
-        [
-            "Flatiron Energy",
-            "Flatiron Energy",
-            2,
-            4,
-            "High"
-        ],
-
-        [
-            "Recurrent Energy",
-            "Recurrent Energy",
-            2,
-            2,
-            "Medium"
-        ],
-
-        [
-            "EDF power solutions North America",
-            "EDF power solutions North America",
-            1,
-            1,
-            "High"
-        ],
-
-        [
-            "EDF Renewables",
-            "EDF Renewables North America",
-            1,
-            1,
-            "High"
-        ],
-
-        [
-            "Greenbacker Renewable Energy Company",
-            "Greenbacker Renewable Energy Company",
-            1,
-            1,
-            "High"
-        ],
-    ],
-
-    columns=[
-
-        "Owner",
-        "Search Term",
-        "Baseline Discount Potential",
-        "Baseline Seller Actionability",
-        "Baseline Confidence",
-    ]
-)
-
-
-# ============================================================
-# BUILD LIVE SELLER INTELLIGENCE
-# ============================================================
-
-def build_live_seller_intelligence():
-
-    output = []
-
-    for _, baseline in seller_baselines.iterrows():
-
-        owner = baseline[
-            "Owner"
-        ]
-
-        search_term = baseline[
-            "Search Term"
-        ]
-
-        articles = fetch_company_news(
-            search_term
-        )
-
-        classified = []
-
-        for article in articles:
-
-            rule = classify_seller_article(
-
-                article.get(
-                    "Title"
-                ),
-
-                article.get(
-                    "Description"
-                )
-            )
-
-            if rule is None:
-
-                continue
-
-            recency = recency_multiplier(
-                article.get(
-                    "Published"
-                )
-            )
-
-            weighted_strength = (
-
-                rule[
-                    "Strength"
-                ]
-
-                * recency
-            )
-
-            classified.append(
-                {
-
-                    **article,
-
-                    "Signal Type":
-                        rule[
-                            "Signal Type"
-                        ],
-
-                    "Discount Potential":
-                        rule[
-                            "Discount Potential"
-                        ],
-
-                    "Seller Actionability":
-                        rule[
-                            "Seller Actionability"
-                        ],
-
-                    "Strength":
-                        rule[
-                            "Strength"
-                        ],
-
-                    "Weighted Strength":
-                        weighted_strength,
-                }
-            )
-
-        classified = sorted(
-
-            classified,
-
-            key=lambda x:
-                x[
-                    "Weighted Strength"
-                ],
-
-            reverse=True
-        )
-
-        if classified:
-
-            strongest = classified[
-                0
-            ]
-
-            confidence = derive_confidence(
-                classified
-            )
-
-            discount_potential = strongest[
-                "Discount Potential"
-            ]
-
-            actionability = strongest[
-                "Seller Actionability"
-            ]
-
-            latest_signal = strongest[
-                "Title"
-            ]
-
-            signal_type = strongest[
-                "Signal Type"
-            ]
-
-            signal_date = strongest[
-                "Published"
-            ]
-
-            source = strongest[
-                "Source"
-            ]
-
-            source_url = strongest[
-                "URL"
-            ]
-
-            status = (
-                "LIVE SIGNAL"
-            )
-
-        else:
-
-            discount_potential = baseline[
-                "Baseline Discount Potential"
-            ]
-
-            actionability = baseline[
-                "Baseline Seller Actionability"
-            ]
-
-            confidence = baseline[
-                "Baseline Confidence"
-            ]
-
-            latest_signal = (
-                "No new qualifying public signal — "
-                "baseline assumption retained"
-            )
-
-            signal_type = (
-                "Baseline"
-            )
-
-            signal_date = pd.NaT
-
-            source = (
-                "Baseline Assumption"
-            )
-
-            source_url = ""
-
-            status = (
-                "BASELINE"
-            )
-
-        output.append(
-            {
-
-                "Owner":
-                    owner,
-
-                "Auto Discount Potential":
-                    discount_potential,
-
-                "Auto Seller Actionability":
-                    actionability,
-
-                "Auto Confidence":
-                    confidence,
-
-                "Signal Type":
-                    signal_type,
-
-                "Latest Signal":
-                    latest_signal,
-
-                "Signal Date":
-                    signal_date,
-
-                "Source":
-                    source,
-
-                "Source URL":
-                    source_url,
-
-                "Signal Status":
-                    status,
-            }
-        )
-
-    return pd.DataFrame(
-        output
-    )
-
-
-# ============================================================
 # SIDEBAR — DATA
 # ============================================================
 
@@ -1048,31 +159,16 @@ st.sidebar.header(
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload latest Orennia CSV",
-    type=[
-        "csv"
-    ]
+    type=["csv"]
 )
-
-st.sidebar.caption(
-    "Seller intelligence refreshes from public information "
-    "every 6 hours when the app is being used."
-)
-
-refresh_seller_intel = st.sidebar.button(
-    "🔄 Refresh Seller Intelligence Now"
-)
-
-if refresh_seller_intel:
-
-    fetch_company_news.clear()
-
-    st.rerun()
 
 st.sidebar.divider()
 
 
 # ============================================================
 # SIDEBAR — OPPORTUNITY SCORE WEIGHTS
+#
+# ORIGINAL SCORING
 # ============================================================
 
 st.sidebar.header(
@@ -1125,7 +221,6 @@ exec_weight = st.sidebar.number_input(
 )
 
 total_weight = (
-
     distress_weight
     + development_weight
     + market_weight
@@ -1134,13 +229,11 @@ total_weight = (
 )
 
 if abs(
-    total_weight
-    - 1.0
+    total_weight - 1.0
 ) > 0.001:
 
     st.sidebar.error(
-        f"Weights total "
-        f"{total_weight:.0%}. "
+        f"Weights currently total {total_weight:.0%}. "
         "They should total 100%."
     )
 
@@ -1396,45 +489,53 @@ with st.sidebar.expander(
     )
 
 market_mix_total = (
-
     revenue_visibility_weight
     + location_market_weight
 )
 
 if abs(
-    market_mix_total
-    - 1.0
+    market_mix_total - 1.0
 ) > 0.001:
 
     st.sidebar.warning(
-        "Market / Revenue mix should equal 100%."
+        f"Market / Revenue mix totals "
+        f"{market_mix_total:.0%}. "
+        "It should equal 100%."
     )
 
 
 # ------------------------------------------------------------
 # ACQUISITION VALUE
+#
+# RESTORED TO PREVIOUS SCORING
 # ------------------------------------------------------------
 
 with st.sidebar.expander(
     "Acquisition Value Points"
 ):
 
-    value_tax_ec = st.number_input(
+    value_both = st.number_input(
         "Tax Credit + Energy Community",
-        value=100,
-        key="value_tax_ec"
+        value=75,
+        key="value_both"
     )
 
-    value_tax_only = st.number_input(
+    value_tax = st.number_input(
         "Tax Credit Only",
-        value=80,
-        key="value_tax_only"
+        value=70,
+        key="value_tax"
     )
 
-    value_no_tax = st.number_input(
-        "No Identified Tax Credit",
-        value=50,
-        key="value_no_tax"
+    value_ec = st.number_input(
+        "Energy Community Only",
+        value=60,
+        key="value_ec"
+    )
+
+    value_none = st.number_input(
+        "Neither Tax Credit nor Energy Community",
+        value=55,
+        key="value_none"
     )
 
 
@@ -1519,24 +620,24 @@ with st.sidebar.expander(
     )
 
 exec_mix_total = (
-
     actionability_weight
     + timing_exec_weight
     + development_exec_weight
 )
 
 if abs(
-    exec_mix_total
-    - 1.0
+    exec_mix_total - 1.0
 ) > 0.001:
 
     st.sidebar.warning(
-        "Executability mix should equal 100%."
+        f"Executability mix totals "
+        f"{exec_mix_total:.0%}. "
+        "It should equal 100%."
     )
 
 
 # ============================================================
-# SCORE MAPS
+# SCORE MAPPINGS
 # ============================================================
 
 discount_score_map = {
@@ -1638,16 +739,18 @@ def calculate_discount_score(
         distress_none
     )
 
-    multiplier = confidence_score_map.get(
-        clean_text(
-            confidence
-        ),
-        confidence_low
+    confidence_multiplier = (
+        confidence_score_map.get(
+            clean_text(
+                confidence
+            ),
+            confidence_low
+        )
     )
 
     return round(
         base_score
-        * multiplier,
+        * confidence_multiplier,
         1
     )
 
@@ -1692,8 +795,6 @@ def location_score(
 
 # ============================================================
 # DASHBOARD GUIDE
-#
-# SELLER INTELLIGENCE IS NO LONGER ABOVE THIS SECTION
 # ============================================================
 
 st.markdown(
@@ -1701,10 +802,7 @@ st.markdown(
 )
 
 guide_left, guide_right = st.columns(
-    [
-        1.55,
-        1
-    ]
+    [1.55, 1]
 )
 
 
@@ -1750,15 +848,15 @@ with guide_left:
 
             "What It Measures": [
 
-                "Current seller motivation / transaction opportunity",
+                "Likelihood owner is motivated to transact",
 
-                "Progress through development and construction",
+                "Project maturity and progress through development",
 
                 "Revenue visibility + ERCOT location",
 
-                "Base tax credit and Energy Community value",
+                "Tax-credit / Energy Community attributes",
 
-                "Ability to realistically execute the transaction",
+                "Ability to realistically execute a transaction",
             ],
         }
     )
@@ -1797,6 +895,166 @@ with guide_left:
     )
 
 
+    # --------------------------------------------------------
+    # EXAMPLE
+    # --------------------------------------------------------
+
+    example_seller = (
+        distress_4
+        * confidence_high
+    )
+
+    example_development = (
+        development_operating
+    )
+
+    example_revenue = (
+        market_both
+    )
+
+    example_location = (
+        location_north
+    )
+
+    example_market = (
+        example_revenue
+        * revenue_visibility_weight
+
+        +
+
+        example_location
+        * location_market_weight
+    )
+
+    example_value = (
+        value_tax
+    )
+
+    example_actionability = 100
+
+    example_timing = (
+        timing_operating
+    )
+
+    example_executability = (
+        example_actionability
+        * actionability_weight
+
+        +
+
+        example_timing
+        * timing_exec_weight
+
+        +
+
+        example_development
+        * development_exec_weight
+    )
+
+    example_final = (
+        example_seller
+        * distress_weight
+
+        +
+
+        example_development
+        * development_weight
+
+        +
+
+        example_market
+        * market_weight
+
+        +
+
+        example_value
+        * value_weight
+
+        +
+
+        example_executability
+        * exec_weight
+    )
+
+    st.markdown(
+        "#### Example"
+    )
+
+    example_background = pd.DataFrame(
+        {
+
+            "Factor": [
+
+                "Seller Motivation",
+
+                "Development Stage",
+
+                "Market / Revenue",
+
+                "Acquisition Value",
+
+                "Executability",
+            ],
+
+            "Score": [
+
+                example_seller,
+
+                example_development,
+
+                example_market,
+
+                example_value,
+
+                example_executability,
+            ],
+
+            "Why": [
+
+                (
+                    "Discount Potential 4 = 80; "
+                    "High Confidence = 100%; "
+                    "80 × 100% = 80"
+                ),
+
+                (
+                    "Operating project = 100"
+                ),
+
+                (
+                    f"Contract + named offtaker = "
+                    f"{example_revenue:.0f}; "
+                    f"ERCOT-N = {example_location:.0f}"
+                ),
+
+                (
+                    "Tax Credit only = 70"
+                ),
+
+                (
+                    f"Actionability 100 × "
+                    f"{actionability_weight:.0%} + "
+                    f"Timing 100 × "
+                    f"{timing_exec_weight:.0%} + "
+                    f"Development Stage 100 × "
+                    f"{development_exec_weight:.0%}"
+                ),
+            ],
+        }
+    )
+
+    st.dataframe(
+        example_background,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.success(
+        f"Example Opportunity Score = "
+        f"{example_final:.1f}"
+    )
+
+
 with guide_right:
 
     st.markdown(
@@ -1809,9 +1067,8 @@ with guide_right:
         **2. Top Acquisition Targets** — Top 20 overall  
         **3. By Technology** — Solar, Storage or Wind  
         **4. ERCOT Area** — Compare market location  
-        **5. Bundles** — Identify portfolio opportunities  
-        **6. Score Breakdown** — Drill into individual projects  
-        **7. Seller Intelligence** — Review owner-level signals
+        **5. Bundles** — Multiple 50–60 MW assets by owner  
+        **6. Score Breakdown** — Drill into a project
         """
     )
 
@@ -1826,6 +1083,53 @@ with guide_right:
         **60–69** → Monitor  
         **<60** → Low Priority
         """
+    )
+
+    st.markdown(
+        "### 🗺️ Location Logic"
+    )
+
+    location_guide = pd.DataFrame(
+        {
+
+            "Area": [
+
+                "ERCOT-N",
+
+                "ERCOT-H",
+
+                "ERCOT-S",
+
+                "ERCOT-W",
+
+                "Panhandle",
+            ],
+
+            "Score": [
+
+                location_north,
+
+                location_houston,
+
+                location_south,
+
+                location_west,
+
+                location_panhandle,
+            ],
+        }
+    )
+
+    st.dataframe(
+        location_guide,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.caption(
+        "Location is a broad screening proxy. "
+        "Node-level congestion, basis, curtailment and market "
+        "fundamentals can materially differ within each area."
     )
 
 
@@ -1843,30 +1147,41 @@ with st.expander(
     )
 
     st.caption(
-        "Seller Motivation is informed by current public signals "
-        "such as strategic reviews, asset-sale activity, "
-        "restructuring, layoffs, project cancellations, liquidity "
-        "pressure and capital recycling."
+        "Discount Potential measures the strength of the seller "
+        "motivation / transaction opportunity. The base score is "
+        "then adjusted by confidence."
     )
 
     seller_logic = pd.DataFrame(
         {
 
             "Discount Potential": [
+
                 "5 – Very High",
+
                 "4 – High",
+
                 "3 – Moderate",
+
                 "2 – Low",
+
                 "1 – Very Low",
+
                 "No Signal",
             ],
 
             "Base Score": [
+
                 distress_5,
+
                 distress_4,
+
                 distress_3,
+
                 distress_2,
+
                 distress_1,
+
                 distress_none,
             ],
         }
@@ -1879,34 +1194,87 @@ with st.expander(
     )
 
 
+    confidence_logic = pd.DataFrame(
+        {
+
+            "Confidence": [
+
+                "High",
+
+                "Medium",
+
+                "Low",
+            ],
+
+            "Multiplier": [
+
+                f"{confidence_high:.0%}",
+
+                f"{confidence_medium:.0%}",
+
+                f"{confidence_low:.0%}",
+            ],
+        }
+    )
+
+    st.dataframe(
+        confidence_logic,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
     st.markdown(
         "#### Development Stage"
+    )
+
+    st.caption(
+        "Measures how far the project has progressed through "
+        "development, interconnection and construction."
     )
 
     development_logic = pd.DataFrame(
         {
 
             "Stage": [
+
                 "Operating / Construction Complete",
+
                 ">50% Construction",
+
                 "In Construction",
+
                 "IA Executed",
+
                 "FIS Completed",
+
                 "FIS Started",
+
                 "Studies Undergoing / Other",
+
                 "Pre-Study",
+
                 "Inactive / Suspended / Retired",
             ],
 
             "Score": [
+
                 development_operating,
+
                 development_50,
+
                 development_construction,
+
                 development_ia,
+
                 development_fis_complete,
+
                 development_fis_started,
+
                 development_studies,
+
                 development_pre,
+
                 development_inactive,
             ],
         }
@@ -1924,24 +1292,33 @@ with st.expander(
     )
 
     st.caption(
-        f"Revenue Visibility × {revenue_visibility_weight:.0%} "
-        f"+ ERCOT Location × {location_market_weight:.0%}"
+        f"Market / Revenue = Revenue Visibility × "
+        f"{revenue_visibility_weight:.0%} + ERCOT Location × "
+        f"{location_market_weight:.0%}."
     )
 
     market_logic = pd.DataFrame(
         {
 
             "Revenue Visibility": [
+
                 "Contract + Named Offtaker",
+
                 "Named Offtaker Only",
+
                 "Contract Only",
+
                 "Neither",
             ],
 
             "Score": [
+
                 market_both,
+
                 market_offtaker,
+
                 market_contract,
+
                 market_none,
             ],
         }
@@ -1953,24 +1330,37 @@ with st.expander(
         hide_index=True
     )
 
+
     location_logic = pd.DataFrame(
         {
 
             "ERCOT Area": [
+
                 "ERCOT-N",
+
                 "ERCOT-H",
+
                 "ERCOT-S",
+
                 "ERCOT-W",
+
                 "Panhandle",
-                "Unknown",
+
+                "Unknown / Other",
             ],
 
             "Location Score": [
+
                 location_north,
+
                 location_houston,
+
                 location_south,
+
                 location_west,
+
                 location_panhandle,
+
                 location_unknown,
             ],
         }
@@ -1987,34 +1377,37 @@ with st.expander(
         "#### Acquisition Value"
     )
 
-    acquisition_logic = pd.DataFrame(
+    value_logic = pd.DataFrame(
         {
 
-            "Tax Position": [
+            "Attributes": [
+
                 "Tax Credit + Energy Community",
+
                 "Tax Credit Only",
-                "No Identified Tax Credit",
+
+                "Energy Community Only",
+
+                "Neither",
             ],
 
             "Score": [
-                value_tax_ec,
-                value_tax_only,
-                value_no_tax,
+
+                value_both,
+
+                value_tax,
+
+                value_ec,
+
+                value_none,
             ],
         }
     )
 
     st.dataframe(
-        acquisition_logic,
+        value_logic,
         use_container_width=True,
         hide_index=True
-    )
-
-    st.caption(
-        "Energy Community is not scored independently because "
-        "the Energy Community bonus is incremental to an "
-        "applicable tax credit. Domestic Content can be "
-        "incorporated once that data is available."
     )
 
 
@@ -2023,11 +1416,18 @@ with st.expander(
     )
 
     st.caption(
-        f"Seller Actionability × {actionability_weight:.0%} "
-        f"+ Timing × {timing_exec_weight:.0%} "
-        f"+ Development Stage × {development_exec_weight:.0%}"
+        f"Executability = Seller Actionability × "
+        f"{actionability_weight:.0%} + Timing × "
+        f"{timing_exec_weight:.0%} + Development Stage × "
+        f"{development_exec_weight:.0%}."
     )
 
+
+st.caption(
+    f"ERCOT Location represents "
+    f"{location_market_weight * market_weight:.1%} of the total "
+    f"Opportunity Score under the current assumptions."
+)
 
 st.caption(
     "Screening tool only — rankings prioritize sourcing and diligence "
@@ -2038,21 +1438,139 @@ st.divider()
 
 
 # ============================================================
-# STOP IF NO ORENNIA FILE
+# DEFAULT SELLER ASSUMPTIONS
+#
+# THESE VALUES DRIVE THE SCORE.
+# ============================================================
+
+seller_signals = pd.DataFrame(
+    [
+
+        [
+            "Birch Creek Energy",
+            5,
+            5,
+            "Medium"
+        ],
+
+        [
+            "Birch Creek Development",
+            5,
+            5,
+            "Medium"
+        ],
+
+        [
+            "esVolta",
+            4,
+            5,
+            "High"
+        ],
+
+        [
+            "Key Capture Energy",
+            4,
+            5,
+            "High"
+        ],
+
+        [
+            "Lightsource BP",
+            3,
+            4,
+            "High"
+        ],
+
+        [
+            "Ørsted U.S. Onshore",
+            3,
+            4,
+            "Medium"
+        ],
+
+        [
+            "Orsted",
+            3,
+            4,
+            "Medium"
+        ],
+
+        [
+            "Flatiron Energy",
+            2,
+            4,
+            "High"
+        ],
+
+        [
+            "Recurrent Energy",
+            2,
+            2,
+            "Medium"
+        ],
+
+        [
+            "EDF power solutions North America",
+            1,
+            1,
+            "High"
+        ],
+
+        [
+            "EDF Renewables",
+            1,
+            1,
+            "High"
+        ],
+
+        [
+            "Greenbacker Renewable Energy Company",
+            1,
+            1,
+            "High"
+        ],
+    ],
+
+    columns=[
+
+        "Owner",
+
+        "Discount Potential",
+
+        "Seller Actionability",
+
+        "Confidence"
+    ]
+)
+
+
+# ============================================================
+# INITIALIZE SELLER ASSUMPTIONS
+# ============================================================
+
+if "seller_assumptions" not in st.session_state:
+
+    st.session_state[
+        "seller_assumptions"
+    ] = seller_signals.copy()
+
+
+# ============================================================
+# NO FILE YET
 # ============================================================
 
 if uploaded_file is None:
 
     st.info(
         "Upload the latest Orennia Power Projects CSV "
-        "to populate the project-level dashboard."
+        "using the sidebar to populate the dashboard."
     )
 
     st.stop()
 
 
 # ============================================================
-# LOAD ORENNIA DATA
+# LOAD DATA
 # ============================================================
 
 df = pd.read_csv(
@@ -2093,7 +1611,7 @@ missing_columns = [
 if missing_columns:
 
     st.error(
-        "Uploaded file is missing: "
+        "The uploaded file is missing these required columns: "
         + ", ".join(
             missing_columns
         )
@@ -2103,7 +1621,7 @@ if missing_columns:
 
 
 # ============================================================
-# CLEAN ORENNIA DATA
+# CLEAN DATA
 # ============================================================
 
 df[
@@ -2163,6 +1681,10 @@ df[
 
 # ============================================================
 # TECHNOLOGY UNIVERSE
+#
+# Solar   = all stages
+# Storage = all stages
+# Wind    = Operating only
 # ============================================================
 
 df = df[
@@ -2246,288 +1768,109 @@ df = df[
 
 
 # ============================================================
-# SELLER INTELLIGENCE & ACTIONABILITY
+# SELLER MOTIVATION / ACTIONABILITY ASSUMPTIONS
 #
-# MOVED BACK DOWN HERE.
-# THIS REPLACES THE OLD ASSUMPTIONS TABLE LOCATION.
+# THIS IS THE ACTUAL SCORING INPUT.
 # ============================================================
 
 st.subheader(
-    "📡 Seller Intelligence & Actionability"
+    "Seller Motivation / Actionability Assumptions"
 )
 
 st.caption(
-    "Current public seller signals feed the Seller Motivation and "
-    "Seller Actionability scores. Data refreshes every six hours "
-    "when the app is in use. Manual overrides can be used for "
-    "more current internal market intelligence."
+    "These assumptions drive the project rankings. "
+    "The automated public intelligence below is informational only "
+    "and does not change the score."
 )
 
 
-with st.spinner(
-    "Updating seller intelligence..."
-):
-
-    auto_sellers = (
-        build_live_seller_intelligence()
-    )
-
-
-# ============================================================
-# MANUAL SELLER OVERRIDES
-# ============================================================
-
-override_template = pd.DataFrame(
-    {
-
-        "Owner":
-            seller_baselines[
-                "Owner"
-            ],
-
-        "Discount Override":
-            np.nan,
-
-        "Actionability Override":
-            np.nan,
-
-        "Confidence Override":
-            "Auto",
-    }
-)
-
-
-if "seller_overrides" not in st.session_state:
-
+current_sellers = (
     st.session_state[
-        "seller_overrides"
-    ] = override_template.copy()
-
-
-known_override_owners = set(
-
-    st.session_state[
-        "seller_overrides"
-    ][
-        "Owner"
-    ]
+        "seller_assumptions"
+    ].copy()
 )
 
 
-missing_override_owners = [
-
-    owner
-
-    for owner in seller_baselines[
-        "Owner"
-    ]
-
-    if owner not in known_override_owners
-]
-
-
-if missing_override_owners:
-
-    additional = pd.DataFrame(
-        {
-
-            "Owner":
-                missing_override_owners,
-
-            "Discount Override":
-                np.nan,
-
-            "Actionability Override":
-                np.nan,
-
-            "Confidence Override":
-                "Auto",
-        }
-    )
-
-    st.session_state[
-        "seller_overrides"
-    ] = pd.concat(
-        [
-
-            st.session_state[
-                "seller_overrides"
-            ],
-
-            additional
-
-        ],
-
-        ignore_index=True
-    )
-
-
-seller_live = auto_sellers.merge(
-
-    st.session_state[
-        "seller_overrides"
-    ],
-
-    on="Owner",
-
-    how="left"
-)
-
-
-seller_live[
-    "Discount Potential"
-] = seller_live.apply(
-
-    lambda row:
-
-        row[
-            "Discount Override"
-        ]
-
-        if not pd.isna(
-            row[
-                "Discount Override"
-            ]
-        )
-
-        else row[
-            "Auto Discount Potential"
-        ],
-
-    axis=1
-)
-
-
-seller_live[
-    "Seller Actionability"
-] = seller_live.apply(
-
-    lambda row:
-
-        row[
-            "Actionability Override"
-        ]
-
-        if not pd.isna(
-            row[
-                "Actionability Override"
-            ]
-        )
-
-        else row[
-            "Auto Seller Actionability"
-        ],
-
-    axis=1
-)
-
-
-seller_live[
-    "Confidence"
-] = seller_live.apply(
-
-    lambda row:
-
-        row[
-            "Confidence Override"
-        ]
-
-        if clean_text(
-            row[
-                "Confidence Override"
-            ]
-        ) not in [
-            "",
-            "Auto"
-        ]
-
-        else row[
-            "Auto Confidence"
-        ],
-
-    axis=1
-)
-
-
-seller_live[
-    "Discount Score"
-] = seller_live.apply(
-
-    lambda row:
-
-        calculate_discount_score(
-
-            row[
-                "Discount Potential"
-            ],
-
-            row[
-                "Confidence"
-            ]
-        ),
-
-    axis=1
-)
-
-
-seller_live[
-    "Actionability Score"
-] = seller_live[
-    "Seller Actionability"
-].apply(
-    actionability_score
-)
-
-
-# ============================================================
-# COMPACT SELLER INTELLIGENCE TABLE
-# ============================================================
-
-seller_display_columns = [
-
-    "Owner",
-
-    "Discount Potential",
-
+current_sellers.insert(
+    2,
     "Discount Score",
+    current_sellers.apply(
 
-    "Seller Actionability",
+        lambda row:
 
+            calculate_discount_score(
+
+                row[
+                    "Discount Potential"
+                ],
+
+                row[
+                    "Confidence"
+                ]
+            ),
+
+        axis=1
+    )
+)
+
+
+current_sellers.insert(
+    4,
     "Actionability Score",
-
-    "Confidence",
-
-    "Signal Status",
-
-    "Signal Type",
-
-    "Signal Date",
-
-    "Source",
-]
+    current_sellers[
+        "Seller Actionability"
+    ].apply(
+        actionability_score
+    )
+)
 
 
-st.dataframe(
+edited_sellers_full = st.data_editor(
 
-    seller_live[
-        seller_display_columns
-    ],
+    current_sellers,
 
     use_container_width=True,
 
     hide_index=True,
 
+    num_rows="dynamic",
+
+    key="seller_assumptions_editor",
+
+    disabled=[
+        "Discount Score",
+        "Actionability Score"
+    ],
+
+    column_order=[
+
+        "Owner",
+
+        "Discount Potential",
+
+        "Discount Score",
+
+        "Seller Actionability",
+
+        "Actionability Score",
+
+        "Confidence",
+    ],
+
     column_config={
 
         "Discount Potential":
             st.column_config.NumberColumn(
-                "Motivation",
-                format="%.0f"
+                "Discount Potential",
+                min_value=1,
+                max_value=5,
+                step=1,
+                format="%d"
             ),
 
         "Discount Score":
             st.column_config.ProgressColumn(
-                "Motivation Score",
+                "Discount Score",
                 min_value=0,
                 max_value=100,
                 format="%.0f"
@@ -2535,8 +1878,11 @@ st.dataframe(
 
         "Seller Actionability":
             st.column_config.NumberColumn(
-                "Actionability",
-                format="%.0f"
+                "Seller Actionability",
+                min_value=1,
+                max_value=5,
+                step=1,
+                format="%d"
             ),
 
         "Actionability Score":
@@ -2547,47 +1893,683 @@ st.dataframe(
                 format="%.0f"
             ),
 
-        "Signal Date":
-            st.column_config.DateColumn(
-                "Signal Date"
+        "Confidence":
+            st.column_config.SelectboxColumn(
+                "Confidence",
+                options=[
+                    "High",
+                    "Medium",
+                    "Low"
+                ]
             ),
     }
 )
 
 
 # ============================================================
-# SELLER SIGNAL DETAIL
-#
-# COLLAPSED BY DEFAULT SO IT IS NOT DISTRACTING
+# SAVE SELLER ASSUMPTIONS
 # ============================================================
 
+editable_seller_columns = [
+
+    "Owner",
+
+    "Discount Potential",
+
+    "Seller Actionability",
+
+    "Confidence",
+]
+
+
+new_seller_assumptions = (
+    edited_sellers_full[
+        editable_seller_columns
+    ]
+    .copy()
+)
+
+
+old_seller_assumptions = (
+    st.session_state[
+        "seller_assumptions"
+    ][
+        editable_seller_columns
+    ]
+    .copy()
+)
+
+
+if not new_seller_assumptions.equals(
+    old_seller_assumptions
+):
+
+    st.session_state[
+        "seller_assumptions"
+    ] = new_seller_assumptions
+
+    st.rerun()
+
+
+edited_sellers = (
+    st.session_state[
+        "seller_assumptions"
+    ].copy()
+)
+
+
+edited_sellers[
+    "Owner Key"
+] = (
+    edited_sellers[
+        "Owner"
+    ]
+    .astype(str)
+    .str.strip()
+    .str.lower()
+)
+
+
+seller_lookup = (
+    edited_sellers
+    .set_index(
+        "Owner Key"
+    )
+    .to_dict(
+        "index"
+    )
+)
+
+
+# ============================================================
+# OPTIONAL AUTOMATED SELLER INTELLIGENCE
+#
+# DISPLAY ONLY.
+# DOES NOT FEED THE SCORE.
+# ============================================================
+
+SELLER_SEARCH_TERMS = {
+
+    "Birch Creek Energy":
+        "Birch Creek Energy",
+
+    "Birch Creek Development":
+        "Birch Creek Energy",
+
+    "esVolta":
+        "esVolta",
+
+    "Key Capture Energy":
+        "Key Capture Energy",
+
+    "Lightsource BP":
+        "Lightsource bp",
+
+    "Ørsted U.S. Onshore":
+        "Orsted U.S. Onshore",
+
+    "Orsted":
+        "Orsted U.S. renewables",
+
+    "Flatiron Energy":
+        "Flatiron Energy",
+
+    "Recurrent Energy":
+        "Recurrent Energy",
+
+    "EDF power solutions North America":
+        "EDF power solutions North America",
+
+    "EDF Renewables":
+        "EDF Renewables North America",
+
+    "Greenbacker Renewable Energy Company":
+        "Greenbacker Renewable Energy Company",
+}
+
+
+SELLER_SIGNAL_TERMS = (
+
+    '"strategic review" OR '
+    '"strategic alternatives" OR '
+    '"asset sale" OR '
+    '"portfolio sale" OR '
+    '"sale process" OR '
+    'divest OR '
+    'divestiture OR '
+    '"capital recycling" OR '
+    'monetization OR '
+    '"sell-down" OR '
+    '"stake sale" OR '
+    'bankruptcy OR '
+    'restructuring OR '
+    'default OR '
+    'distress OR '
+    'liquidity OR '
+    'layoffs OR '
+    '"job cuts" OR '
+    '"project cancellation"'
+)
+
+
+@st.cache_data(
+    ttl=SELLER_REFRESH_SECONDS,
+    show_spinner=False
+)
+def fetch_company_news(
+    search_term
+):
+
+    query = (
+        f'"{search_term}" '
+        f'({SELLER_SIGNAL_TERMS}) '
+        f'when:{SELLER_LOOKBACK_DAYS}d'
+    )
+
+    encoded_query = urllib.parse.quote_plus(
+        query
+    )
+
+    url = (
+        "https://news.google.com/rss/search?"
+        f"q={encoded_query}"
+        "&hl=en-US"
+        "&gl=US"
+        "&ceid=US:en"
+    )
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent":
+                "Mozilla/5.0 ERCOT-Acquisition-Dashboard"
+        }
+    )
+
+    articles = []
+
+    try:
+
+        with urllib.request.urlopen(
+            request,
+            timeout=10
+        ) as response:
+
+            xml_data = response.read()
+
+        root = ET.fromstring(
+            xml_data
+        )
+
+        for item in root.findall(
+            ".//item"
+        ):
+
+            title = clean_text(
+                item.findtext(
+                    "title"
+                )
+            )
+
+            description = strip_html(
+                item.findtext(
+                    "description"
+                )
+            )
+
+            source = clean_text(
+                item.findtext(
+                    "source"
+                )
+            )
+
+            link = clean_text(
+                item.findtext(
+                    "link"
+                )
+            )
+
+            published_raw = clean_text(
+                item.findtext(
+                    "pubDate"
+                )
+            )
+
+            published = pd.NaT
+
+            if published_raw:
+
+                try:
+
+                    parsed = parsedate_to_datetime(
+                        published_raw
+                    )
+
+                    if parsed.tzinfo is None:
+
+                        parsed = parsed.replace(
+                            tzinfo=timezone.utc
+                        )
+
+                    published = pd.Timestamp(
+                        parsed
+                    )
+
+                except Exception:
+
+                    published = pd.NaT
+
+            articles.append(
+                {
+
+                    "Title":
+                        title,
+
+                    "Description":
+                        description,
+
+                    "Source":
+                        source,
+
+                    "Published":
+                        published,
+
+                    "URL":
+                        link,
+                }
+            )
+
+    except Exception:
+
+        return []
+
+    return articles
+
+
+SELLER_SIGNAL_RULES = [
+
+    {
+
+        "Signal Type":
+            "Formal Sale / Strategic Review",
+
+        "Keywords": [
+
+            "strategic review",
+
+            "strategic alternatives",
+
+            "sale process",
+
+            "portfolio sale",
+
+            "asset sale",
+
+            "exploring a sale",
+
+            "divestiture",
+        ],
+
+        "Suggested Motivation":
+            5,
+
+        "Suggested Actionability":
+            5,
+    },
+
+    {
+
+        "Signal Type":
+            "Restructuring / Financial Stress",
+
+        "Keywords": [
+
+            "bankruptcy",
+
+            "chapter 11",
+
+            "restructuring",
+
+            "default",
+
+            "distressed",
+
+            "liquidity crisis",
+
+            "going concern",
+        ],
+
+        "Suggested Motivation":
+            5,
+
+        "Suggested Actionability":
+            4,
+    },
+
+    {
+
+        "Signal Type":
+            "Capital Recycling / Monetization",
+
+        "Keywords": [
+
+            "capital recycling",
+
+            "asset monetization",
+
+            "monetization",
+
+            "sell-down",
+
+            "sell down",
+
+            "stake sale",
+        ],
+
+        "Suggested Motivation":
+            4,
+
+        "Suggested Actionability":
+            5,
+    },
+
+    {
+
+        "Signal Type":
+            "Layoffs / Cost Reduction",
+
+        "Keywords": [
+
+            "layoffs",
+
+            "layoff",
+
+            "job cuts",
+
+            "workforce reduction",
+
+            "headcount reduction",
+        ],
+
+        "Suggested Motivation":
+            4,
+
+        "Suggested Actionability":
+            3,
+    },
+
+    {
+
+        "Signal Type":
+            "Project Cancellation / Portfolio Pressure",
+
+        "Keywords": [
+
+            "project cancellation",
+
+            "project cancellations",
+
+            "cancelled project",
+
+            "canceled project",
+
+            "project impairment",
+
+            "impairment charge",
+        ],
+
+        "Suggested Motivation":
+            4,
+
+        "Suggested Actionability":
+            3,
+    },
+]
+
+
+def classify_article(
+    title,
+    description
+):
+
+    text = (
+        clean_text(
+            title
+        )
+
+        + " "
+
+        + clean_text(
+            description
+        )
+    ).lower()
+
+    for rule in SELLER_SIGNAL_RULES:
+
+        for keyword in rule[
+            "Keywords"
+        ]:
+
+            if keyword.lower() in text:
+
+                return rule
+
+    return None
+
+
+def build_advisory_seller_intelligence():
+
+    rows = []
+
+    for _, seller in edited_sellers.iterrows():
+
+        owner = seller[
+            "Owner"
+        ]
+
+        search_term = SELLER_SEARCH_TERMS.get(
+            owner,
+            owner
+        )
+
+        articles = fetch_company_news(
+            search_term
+        )
+
+        classified_articles = []
+
+        for article in articles:
+
+            rule = classify_article(
+
+                article.get(
+                    "Title"
+                ),
+
+                article.get(
+                    "Description"
+                )
+            )
+
+            if rule is None:
+                continue
+
+            classified_articles.append(
+                {
+
+                    **article,
+
+                    "Signal Type":
+                        rule[
+                            "Signal Type"
+                        ],
+
+                    "Suggested Motivation":
+                        rule[
+                            "Suggested Motivation"
+                        ],
+
+                    "Suggested Actionability":
+                        rule[
+                            "Suggested Actionability"
+                        ],
+                }
+            )
+
+        if classified_articles:
+
+            classified_articles = sorted(
+                classified_articles,
+                key=lambda x:
+                    (
+                        pd.Timestamp.min
+                        if pd.isna(
+                            x[
+                                "Published"
+                            ]
+                        )
+                        else pd.Timestamp(
+                            x[
+                                "Published"
+                            ]
+                        ).tz_localize(
+                            None
+                        )
+                    ),
+                reverse=True
+            )
+
+            latest = classified_articles[
+                0
+            ]
+
+            rows.append(
+                {
+
+                    "Owner":
+                        owner,
+
+                    "Current Motivation":
+                        seller[
+                            "Discount Potential"
+                        ],
+
+                    "Current Actionability":
+                        seller[
+                            "Seller Actionability"
+                        ],
+
+                    "Suggested Motivation":
+                        latest[
+                            "Suggested Motivation"
+                        ],
+
+                    "Suggested Actionability":
+                        latest[
+                            "Suggested Actionability"
+                        ],
+
+                    "Signal Type":
+                        latest[
+                            "Signal Type"
+                        ],
+
+                    "Signal Date":
+                        latest[
+                            "Published"
+                        ],
+
+                    "Source":
+                        latest[
+                            "Source"
+                        ],
+
+                    "Latest Signal":
+                        latest[
+                            "Title"
+                        ],
+
+                    "Article":
+                        latest[
+                            "URL"
+                        ],
+                }
+            )
+
+        else:
+
+            rows.append(
+                {
+
+                    "Owner":
+                        owner,
+
+                    "Current Motivation":
+                        seller[
+                            "Discount Potential"
+                        ],
+
+                    "Current Actionability":
+                        seller[
+                            "Seller Actionability"
+                        ],
+
+                    "Suggested Motivation":
+                        np.nan,
+
+                    "Suggested Actionability":
+                        np.nan,
+
+                    "Signal Type":
+                        "No qualifying recent signal",
+
+                    "Signal Date":
+                        pd.NaT,
+
+                    "Source":
+                        "",
+
+                    "Latest Signal":
+                        "",
+
+                    "Article":
+                        "",
+                }
+            )
+
+    return pd.DataFrame(
+        rows
+    )
+
+
 with st.expander(
-    "📰 View Seller Signal Detail",
+    "📡 Public Seller Intelligence — Informational Only",
     expanded=False
 ):
 
-    detailed_columns = [
+    st.caption(
+        "This feed looks for recent public seller signals and provides "
+        "a suggested score direction. It does NOT change the assumptions "
+        "above or affect project rankings."
+    )
 
-        "Owner",
+    refresh_intelligence = st.button(
+        "🔄 Refresh Public Signals"
+    )
 
-        "Signal Status",
+    if refresh_intelligence:
 
-        "Signal Type",
+        fetch_company_news.clear()
 
-        "Signal Date",
+        st.rerun()
 
-        "Source",
-
-        "Latest Signal",
-
-        "Source URL",
-    ]
+    advisory_intelligence = (
+        build_advisory_seller_intelligence()
+    )
 
     st.dataframe(
 
-        seller_live[
-            detailed_columns
-        ],
+        advisory_intelligence,
 
         use_container_width=True,
 
@@ -2595,12 +2577,36 @@ with st.expander(
 
         column_config={
 
+            "Current Motivation":
+                st.column_config.NumberColumn(
+                    "Current Motivation",
+                    format="%.0f"
+                ),
+
+            "Current Actionability":
+                st.column_config.NumberColumn(
+                    "Current Actionability",
+                    format="%.0f"
+                ),
+
+            "Suggested Motivation":
+                st.column_config.NumberColumn(
+                    "Suggested Motivation",
+                    format="%.0f"
+                ),
+
+            "Suggested Actionability":
+                st.column_config.NumberColumn(
+                    "Suggested Actionability",
+                    format="%.0f"
+                ),
+
             "Signal Date":
                 st.column_config.DateColumn(
                     "Signal Date"
                 ),
 
-            "Source URL":
+            "Article":
                 st.column_config.LinkColumn(
                     "Article"
                 ),
@@ -2608,118 +2614,14 @@ with st.expander(
     )
 
 
-# ============================================================
-# MANUAL OVERRIDE EDITOR
-# ============================================================
-
-with st.expander(
-    "✏️ Manual Seller Overrides",
-    expanded=False
-):
-
-    st.caption(
-        "Leave an override blank to use the automated public-data "
-        "score. Use an override when internal market intelligence "
-        "is more current or reliable."
-    )
-
-    edited_overrides = st.data_editor(
-
-        st.session_state[
-            "seller_overrides"
-        ],
-
-        use_container_width=True,
-
-        hide_index=True,
-
-        key="seller_override_editor",
-
-        disabled=[
-            "Owner"
-        ],
-
-        column_config={
-
-            "Discount Override":
-                st.column_config.NumberColumn(
-                    "Motivation Override",
-                    min_value=1,
-                    max_value=5,
-                    step=1
-                ),
-
-            "Actionability Override":
-                st.column_config.NumberColumn(
-                    "Actionability Override",
-                    min_value=1,
-                    max_value=5,
-                    step=1
-                ),
-
-            "Confidence Override":
-                st.column_config.SelectboxColumn(
-                    "Confidence Override",
-                    options=[
-                        "Auto",
-                        "High",
-                        "Medium",
-                        "Low"
-                    ]
-                ),
-        }
-    )
-
-    if not edited_overrides.equals(
-
-        st.session_state[
-            "seller_overrides"
-        ]
-    ):
-
-        st.session_state[
-            "seller_overrides"
-        ] = edited_overrides
-
-        st.rerun()
-
-
 st.divider()
 
 
 # ============================================================
-# SELLER LOOKUP
+# MAP SELLER ASSUMPTIONS TO PROJECTS
+#
+# ONLY THE EDITABLE ASSUMPTIONS TABLE ABOVE IS USED.
 # ============================================================
-
-seller_lookup_df = seller_live[
-    [
-
-        "Owner",
-
-        "Discount Potential",
-
-        "Seller Actionability",
-
-        "Confidence",
-    ]
-].copy()
-
-
-seller_lookup_df[
-    "Owner Key"
-] = seller_lookup_df[
-    "Owner"
-].apply(
-    owner_key
-)
-
-
-seller_lookup = seller_lookup_df.set_index(
-    "Owner Key"
-).to_dict(
-    "index"
-)
-
 
 def get_seller_value(
     owner,
@@ -2951,6 +2853,8 @@ df[
 
 # ============================================================
 # ENERGY COMMUNITY
+#
+# ORIGINAL LOGIC RESTORED
 # ============================================================
 
 energy_columns = [
@@ -3002,6 +2906,8 @@ df[
 
 # ============================================================
 # ACQUISITION VALUE
+#
+# ORIGINAL 75 / 70 / 60 / 55 LOGIC
 # ============================================================
 
 def acquisition_value(
@@ -3021,15 +2927,19 @@ def acquisition_value(
         == "Yes"
     )
 
-    if not tax_credit:
+    if tax_credit and ec:
 
-        return value_no_tax
+        return value_both
+
+    if tax_credit:
+
+        return value_tax
 
     if ec:
 
-        return value_tax_ec
+        return value_ec
 
-    return value_tax_only
+    return value_none
 
 
 df[
@@ -3041,7 +2951,7 @@ df[
 
 
 # ============================================================
-# TIMING
+# TIMING SCORE
 # ============================================================
 
 as_of_date = pd.Timestamp(
@@ -3096,7 +3006,7 @@ df[
 
 
 # ============================================================
-# ACTIONABILITY
+# ACTIONABILITY SCORE
 # ============================================================
 
 df[
@@ -3109,7 +3019,7 @@ df[
 
 
 # ============================================================
-# EXECUTABILITY
+# EXECUTABILITY SCORE
 # ============================================================
 
 df[
@@ -3210,6 +3120,8 @@ df[
 
 # ============================================================
 # OPPORTUNITY SCORE
+#
+# ORIGINAL SCORING FORMULA
 # ============================================================
 
 df[
@@ -3392,7 +3304,7 @@ def why_it_ranks(
     ] >= 80:
 
         reasons.append(
-            "Some contracted revenue visibility"
+            "Some contracted visibility"
         )
 
     if row[
@@ -3405,10 +3317,10 @@ def why_it_ranks(
 
     if row[
         "Acquisition Value"
-    ] >= 80:
+    ] >= 70:
 
         reasons.append(
-            "Attractive tax-credit attributes"
+            "Attractive tax-credit / siting attributes"
         )
 
     if row[
@@ -3442,9 +3354,7 @@ def why_it_ranks(
         )
 
     return "; ".join(
-        reasons[
-            :3
-        ]
+        reasons[:3]
     )
 
 
@@ -3485,7 +3395,7 @@ def key_risk(
     ] < 75:
 
         risks.append(
-            "Development / execution risk remains"
+            "Development risk remains"
         )
 
     if row[
@@ -3509,7 +3419,7 @@ def key_risk(
     ] <= 50:
 
         risks.append(
-            "Lower broad-area location score"
+            "Lower broad-area location score; node may differ"
         )
 
     if pd.isna(
@@ -3537,9 +3447,7 @@ def key_risk(
         )
 
     return "; ".join(
-        risks[
-            :2
-        ]
+        risks[:2]
     )
 
 
@@ -3617,6 +3525,10 @@ st.subheader(
     "🎯 Management Shortlist"
 )
 
+st.caption(
+    "Top five current acquisition priorities based on the screening model."
+)
+
 
 management_shortlist = df.head(
     5
@@ -3662,6 +3574,16 @@ management_columns = [
 ]
 
 
+management_columns = [
+
+    col
+
+    for col in management_columns
+
+    if col in management_shortlist.columns
+]
+
+
 st.dataframe(
 
     management_shortlist[
@@ -3684,16 +3606,16 @@ st.dataframe(
                 "Tech"
             ),
 
-        "Location Score":
-            st.column_config.NumberColumn(
-                "Location",
-                format="%.0f"
-            ),
-
         "Capacity (MW)":
             st.column_config.NumberColumn(
                 "MW",
                 format="%.1f"
+            ),
+
+        "Location Score":
+            st.column_config.NumberColumn(
+                "Location",
+                format="%.0f"
             ),
 
         "Opportunity Score":
@@ -3713,7 +3635,7 @@ st.dataframe(
 
 
 # ============================================================
-# FILTERS
+# GLOBAL FILTERS
 # ============================================================
 
 st.divider()
@@ -3729,7 +3651,6 @@ f1, f2, f3, f4 = st.columns(
 
 
 technology_options = sorted(
-
     df[
         "Power Project Type"
     ]
@@ -3739,17 +3660,13 @@ technology_options = sorted(
 
 
 selected_technology = f1.multiselect(
-
     "Technology",
-
     technology_options,
-
     default=technology_options
 )
 
 
-area_options = sorted(
-
+ercot_area_options = sorted(
     df[
         "ERCOT Area"
     ]
@@ -3758,13 +3675,10 @@ area_options = sorted(
 )
 
 
-selected_areas = f2.multiselect(
-
+selected_ercot_areas = f2.multiselect(
     "ERCOT Area",
-
-    area_options,
-
-    default=area_options
+    ercot_area_options,
+    default=ercot_area_options
 )
 
 
@@ -3791,7 +3705,6 @@ selected_owners = f3.multiselect(
 
 
 status_options = sorted(
-
     df[
         "Power Project Status"
     ]
@@ -3801,11 +3714,8 @@ status_options = sorted(
 
 
 selected_status = f4.multiselect(
-
     "Project Status",
-
     status_options,
-
     default=status_options
 )
 
@@ -3816,23 +3726,25 @@ filtered = df[
     ].isin(
         selected_technology
     )
+].copy()
 
-    &
 
-    df[
+filtered = filtered[
+    filtered[
         "ERCOT Area"
     ].isin(
-        selected_areas
+        selected_ercot_areas
     )
+]
 
-    &
 
-    df[
+filtered = filtered[
+    filtered[
         "Power Project Status"
     ].isin(
         selected_status
     )
-].copy()
+]
 
 
 if selected_owners:
@@ -3854,6 +3766,10 @@ st.divider()
 
 st.subheader(
     "🏆 Top Acquisition Targets"
+)
+
+st.caption(
+    "Top 20 projects based on Opportunity Score."
 )
 
 
@@ -3911,13 +3827,16 @@ existing_display_columns = [
 ]
 
 
+top_20 = filtered[
+    existing_display_columns
+].head(
+    20
+)
+
+
 st.dataframe(
 
-    filtered[
-        existing_display_columns
-    ].head(
-        20
-    ),
+    top_20,
 
     use_container_width=True,
 
@@ -3925,14 +3844,33 @@ st.dataframe(
 
     column_config={
 
-        "First Power Date":
-            st.column_config.DateColumn(
-                "COD"
-            ),
-
         "Distress Score":
             st.column_config.NumberColumn(
                 "Seller Motivation"
+            ),
+
+        "Development Stage":
+            st.column_config.NumberColumn(
+                "Development Stage",
+                format="%.1f"
+            ),
+
+        "Revenue Visibility":
+            st.column_config.NumberColumn(
+                "Revenue Visibility",
+                format="%.1f"
+            ),
+
+        "Location Score":
+            st.column_config.NumberColumn(
+                "Location",
+                format="%.0f"
+            ),
+
+        "Market / Revenue":
+            st.column_config.NumberColumn(
+                "Market / Revenue",
+                format="%.1f"
             ),
 
         "Opportunity Score":
@@ -3941,6 +3879,11 @@ st.dataframe(
                 min_value=0,
                 max_value=100,
                 format="%.1f"
+            ),
+
+        "First Power Date":
+            st.column_config.DateColumn(
+                "COD"
             ),
     }
 )
@@ -3958,7 +3901,6 @@ st.subheader(
 
 
 tech_options = sorted(
-
     df[
         "Power Project Type"
     ]
@@ -4012,6 +3954,11 @@ technology_ranked[
 )
 
 
+technology_top_20 = technology_ranked.head(
+    20
+)
+
+
 tech_columns = [
 
     "Technology Rank",
@@ -4030,7 +3977,15 @@ tech_columns = [
 
     "First Power Date",
 
+    "Contract Type",
+
+    "Contract Offtaker",
+
+    "Distress Score",
+
     "Development Stage",
+
+    "Revenue Visibility",
 
     "Market / Revenue",
 
@@ -4044,13 +3999,50 @@ tech_columns = [
 ]
 
 
+tech_columns = [
+
+    col
+
+    for col in tech_columns
+
+    if col in technology_top_20.columns
+]
+
+
+t1, t2, t3 = st.columns(
+    3
+)
+
+
+t1.metric(
+    f"{selected_tech_rank} Projects",
+    len(
+        technology_ranked
+    )
+)
+
+
+t2.metric(
+    f"{selected_tech_rank} Capacity",
+    f"{technology_ranked['Capacity (MW)'].sum():,.0f} MW"
+)
+
+
+if len(
+    technology_ranked
+) > 0:
+
+    t3.metric(
+        "Top Technology Score",
+        f"{technology_ranked['Opportunity Score'].max():.1f}"
+    )
+
+
 st.dataframe(
 
-    technology_ranked[
+    technology_top_20[
         tech_columns
-    ].head(
-        20
-    ),
+    ],
 
     use_container_width=True,
 
@@ -4061,6 +4053,35 @@ st.dataframe(
         "Technology Rank":
             st.column_config.NumberColumn(
                 "Rank"
+            ),
+
+        "Distress Score":
+            st.column_config.NumberColumn(
+                "Seller Motivation"
+            ),
+
+        "Development Stage":
+            st.column_config.NumberColumn(
+                "Development Stage",
+                format="%.1f"
+            ),
+
+        "Location Score":
+            st.column_config.NumberColumn(
+                "Location",
+                format="%.0f"
+            ),
+
+        "Revenue Visibility":
+            st.column_config.NumberColumn(
+                "Revenue Visibility",
+                format="%.1f"
+            ),
+
+        "Market / Revenue":
+            st.column_config.NumberColumn(
+                "Market / Revenue",
+                format="%.1f"
             ),
 
         "First Power Date":
@@ -4089,14 +4110,19 @@ st.subheader(
     "🗺️ ERCOT Area Summary"
 )
 
+st.caption(
+    "Broad market-location screen by ERCOT area. "
+    "Location affects 30% of Market / Revenue and currently "
+    f"{location_market_weight * market_weight:.1%} of the total "
+    "Opportunity Score."
+)
+
 
 area_summary = (
-
     df.groupby(
         "ERCOT Area",
         as_index=False
     )
-
     .agg(
 
         Projects=(
@@ -4127,7 +4153,21 @@ area_summary = (
 )
 
 
-area_summary = area_summary.rename(
+area_summary = area_summary.sort_values(
+
+    by=[
+        "Location_Score",
+        "Average_Score"
+    ],
+
+    ascending=[
+        False,
+        False
+    ]
+)
+
+
+area_summary_display = area_summary.rename(
     columns={
 
         "Location_Score":
@@ -4143,9 +4183,41 @@ area_summary = area_summary.rename(
 
 
 st.dataframe(
-    area_summary,
+
+    area_summary_display,
+
     use_container_width=True,
-    hide_index=True
+
+    hide_index=True,
+
+    column_config={
+
+        "MW":
+            st.column_config.NumberColumn(
+                "MW",
+                format="%.0f"
+            ),
+
+        "Location Score":
+            st.column_config.ProgressColumn(
+                "Location Score",
+                min_value=0,
+                max_value=100,
+                format="%.0f"
+            ),
+
+        "Average Score":
+            st.column_config.NumberColumn(
+                "Average Score",
+                format="%.1f"
+            ),
+
+        "Best Score":
+            st.column_config.NumberColumn(
+                "Best Score",
+                format="%.1f"
+            ),
+    }
 )
 
 
@@ -4157,6 +4229,11 @@ st.divider()
 
 st.subheader(
     "📦 Bundle Opportunities"
+)
+
+st.caption(
+    "Owners with at least two 50–60 MW projects. "
+    "Bundles are ranked by average Opportunity Score."
 )
 
 
@@ -4172,14 +4249,11 @@ bundle_candidates = df[
 
 
 bundle_summary = (
-
     bundle_candidates
-
     .groupby(
         "Owner",
         as_index=False
     )
-
     .agg(
 
         Bundle_Projects=(
@@ -4208,8 +4282,7 @@ bundle_summary = (
 bundle_summary = bundle_summary[
     bundle_summary[
         "Bundle_Projects"
-    ]
-    >= 2
+    ] >= 2
 ].copy()
 
 
@@ -4248,39 +4321,115 @@ bundle_summary.insert(
 if bundle_summary.empty:
 
     st.info(
-        "No owners currently have multiple 50–60 MW projects."
+        "No owners currently have multiple "
+        "50–60 MW projects."
     )
 
 else:
 
+    bundle_summary_display = bundle_summary.rename(
+        columns={
+
+            "Bundle_Projects":
+                "Projects",
+
+            "Bundle_MW":
+                "Total MW",
+
+            "Average_Score":
+                "Average Score",
+
+            "Best_Score":
+                "Best Score",
+        }
+    )
+
     st.dataframe(
-        bundle_summary,
+
+        bundle_summary_display,
+
         use_container_width=True,
-        hide_index=True
+
+        hide_index=True,
+
+        column_config={
+
+            "Bundle Rank":
+                st.column_config.NumberColumn(
+                    "Rank"
+                ),
+
+            "Average Score":
+                st.column_config.ProgressColumn(
+                    "Average Score",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f"
+                ),
+
+            "Best Score":
+                st.column_config.ProgressColumn(
+                    "Best Score",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f"
+                ),
+
+            "Total MW":
+                st.column_config.NumberColumn(
+                    "Total MW",
+                    format="%.1f MW"
+                ),
+        }
     )
 
 
     for _, bundle in bundle_summary.iterrows():
 
-        owner = bundle[
+        bundle_owner = bundle[
             "Owner"
         ]
 
-        owner_projects = bundle_candidates[
-            bundle_candidates[
-                "Owner"
+        bundle_rank = int(
+            bundle[
+                "Bundle Rank"
             ]
-            == owner
-        ].sort_values(
-            "Opportunity Score",
-            ascending=False
         )
 
+        bundle_count = int(
+            bundle[
+                "Bundle_Projects"
+            ]
+        )
+
+        bundle_mw = bundle[
+            "Bundle_MW"
+        ]
+
+        bundle_avg = bundle[
+            "Average_Score"
+        ]
+
+
+        owner_projects = (
+            bundle_candidates[
+                bundle_candidates[
+                    "Owner"
+                ]
+                == bundle_owner
+            ]
+            .sort_values(
+                "Opportunity Score",
+                ascending=False
+            )
+        )
+
+
         with st.expander(
-            f"📦 {owner} — "
-            f"{int(bundle['Bundle_Projects'])} projects | "
-            f"{bundle['Bundle_MW']:,.1f} MW | "
-            f"Avg Score {bundle['Average_Score']:.1f}"
+            f"#{bundle_rank} 📦 {bundle_owner} — "
+            f"{bundle_count} projects | "
+            f"{bundle_mw:,.1f} MW | "
+            f"Avg Score {bundle_avg:.1f}"
         ):
 
             bundle_columns = [
@@ -4288,6 +4437,10 @@ else:
                 "Power Project Name",
 
                 "ERCOT Area",
+
+                "ISO Zone",
+
+                "Location Score",
 
                 "Capacity (MW)",
 
@@ -4297,12 +4450,39 @@ else:
 
                 "First Power Date",
 
+                "Queue ID",
+
+                "Contract Type",
+
+                "Contract Offtaker",
+
+                "Distress Score",
+
                 "Development Stage",
+
+                "Revenue Visibility",
+
+                "Market / Revenue",
+
+                "Acquisition Value",
+
+                "Executability",
 
                 "Opportunity Score",
 
                 "Action",
             ]
+
+
+            bundle_columns = [
+
+                col
+
+                for col in bundle_columns
+
+                if col in owner_projects.columns
+            ]
+
 
             st.dataframe(
 
@@ -4315,6 +4495,23 @@ else:
                 hide_index=True,
 
                 column_config={
+
+                    "Distress Score":
+                        st.column_config.NumberColumn(
+                            "Seller Motivation"
+                        ),
+
+                    "Development Stage":
+                        st.column_config.NumberColumn(
+                            "Development Stage",
+                            format="%.1f"
+                        ),
+
+                    "Location Score":
+                        st.column_config.NumberColumn(
+                            "Location",
+                            format="%.0f"
+                        ),
 
                     "First Power Date":
                         st.column_config.DateColumn(
@@ -4348,14 +4545,10 @@ if len(
 ) > 0:
 
     selected_project = st.selectbox(
-
         "Select a Project",
-
         filtered[
             "Power Project Name"
-        ].tolist(),
-
-        key="project_score_breakdown"
+        ].tolist()
     )
 
 
@@ -4419,12 +4612,8 @@ if len(
 
 
     st.caption(
-        "ISO Zone: "
-        + clean_text(
-            project.get(
-                "ISO Zone"
-            )
-        )
+        f"ISO Zone: "
+        f"{clean_text(project.get('ISO Zone'))}"
     )
 
 
@@ -4435,17 +4624,13 @@ if len(
     ):
 
         st.caption(
-            "Point of Interconnection: "
-            + clean_text(
-                project.get(
-                    "Point of Interconnection"
-                )
-            )
+            f"Point of Interconnection: "
+            f"{project['Point of Interconnection']}"
         )
 
 
     # --------------------------------------------------------
-    # MARKET / REVENUE
+    # MARKET / REVENUE DETAIL
     # --------------------------------------------------------
 
     st.markdown(
@@ -4471,7 +4656,7 @@ if len(
 
 
     m3.metric(
-        "Market / Revenue",
+        "Market / Revenue Score",
         f"{project['Market / Revenue']:.1f}"
     )
 
@@ -4487,7 +4672,7 @@ if len(
 
 
     # --------------------------------------------------------
-    # OPPORTUNITY SCORE
+    # OVERALL SCORE COMPONENTS
     # --------------------------------------------------------
 
     st.markdown(
@@ -4537,7 +4722,7 @@ if len(
 
 
     # --------------------------------------------------------
-    # EXECUTABILITY
+    # EXECUTABILITY DETAIL
     # --------------------------------------------------------
 
     st.markdown(
@@ -4613,7 +4798,7 @@ if len(
 
 
 # ============================================================
-# OWNER SUMMARY
+# OWNER OPPORTUNITY SUMMARY
 # ============================================================
 
 st.divider()
@@ -4624,12 +4809,10 @@ st.subheader(
 
 
 owner_summary = (
-
     df.groupby(
         "Owner",
         as_index=False
     )
-
     .agg(
 
         Projects=(
@@ -4650,7 +4833,7 @@ owner_summary = (
         Best_Score=(
             "Opportunity Score",
             "max"
-        )
+        ),
     )
 )
 
@@ -4669,7 +4852,7 @@ owner_summary = owner_summary.sort_values(
 )
 
 
-owner_summary = owner_summary.rename(
+owner_summary_display = owner_summary.rename(
     columns={
 
         "Average_Score":
@@ -4683,13 +4866,30 @@ owner_summary = owner_summary.rename(
 
 st.dataframe(
 
-    owner_summary.head(
+    owner_summary_display.head(
         25
     ),
 
     use_container_width=True,
 
-    hide_index=True
+    hide_index=True,
+
+    column_config={
+
+        "Average Score":
+            st.column_config.NumberColumn(
+                "Average Score",
+                format="%.1f"
+            ),
+
+        "Best Score":
+            st.column_config.ProgressColumn(
+                "Best Score",
+                min_value=0,
+                max_value=100,
+                format="%.1f"
+            ),
+    }
 )
 
 
@@ -4713,9 +4913,7 @@ st.download_button(
 
     data=csv,
 
-    file_name=(
-        "ERCOT_Scored_Acquisition_Universe.csv"
-    ),
+    file_name="ERCOT_Scored_Acquisition_Universe.csv",
 
     mime="text/csv"
 )
