@@ -5,7 +5,6 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import date, timezone
 from email.utils import parsedate_to_datetime
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -390,32 +389,24 @@ dashboard_tab, map_tab = st.tabs(
 
 
 # ============================================================
-# LOAD DATA
-#
-# The Acquisition Dashboard does NOT require a manual upload.
-# If the user uploads a newer Orennia CSV, that file is used for
-# the current session. Otherwise, the app automatically loads the
-# newest Power Projects-*.csv bundled in the GitHub/Streamlit repo.
+# NO FILE YET
 # ============================================================
-APP_DIR = Path(__file__).resolve().parent
-
-repo_csv_files = sorted(
-    APP_DIR.rglob("Power Projects-*.csv"),
-    key=lambda path: path.stat().st_mtime,
-    reverse=True,
-)
-
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-elif repo_csv_files:
-    df = pd.read_csv(repo_csv_files[0])
-else:
-    st.error(
-        "The dashboard data file is missing from the app repository. "
-        "Add the latest Power Projects-*.csv file beside streamlit_app.py. "
-        "The sidebar uploader is optional and should only be used for an ad hoc refresh."
-    )
+if uploaded_file is None:
+    with dashboard_tab:
+        st.info(
+            "Upload the latest Orennia Power Projects CSV using the sidebar to populate the dashboard."
+        )
+    with map_tab:
+        st.info(
+            "Upload the latest Orennia CSV with Latitude and Longitude fields to populate the Map Explorer."
+        )
     st.stop()
+
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+df = pd.read_csv(uploaded_file)
 
 required_columns = [
     "Power Project Name",
