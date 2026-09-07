@@ -788,12 +788,1420 @@ if "seller_assumptions" not in st.session_state:
 # ============================================================
 # MAIN TABS
 # ============================================================
-dashboard_tab, map_tab = st.tabs(
+dashboard_tab, map_tab, price_tab = st.tabs(
     [
         "📊 Acquisition Dashboard",
-        "🗺️ Map Explorer"
+        "🗺️ Map Explorer",
+        "📈 ERCOT Market Prices"
     ]
 )
+
+
+# ============================================================
+# ERCOT LIVE MARKET PRICE HELPERS
+#
+# Uses ERCOT's public Current Day Report HTML pages so the
+# Streamlit app does not require an ERCOT API credential.
+#
+# Real-Time Settlement Point Prices:
+# https://www.ercot.com/content/cdr/html/real_time_spp.html
+#
+# Day-Ahead Settlement Point Prices:
+# https://www.ercot.com/content/cdr/html/dam_spp.html
+#
+# Day-Ahead Ancillary Service MCPC:
+# https://www.ercot.com/content/cdr/html/dam_mcpc.html
+# ============================================================
+
+ERCOT_RT_SPP_URL = (
+    "https://www.ercot.com/content/cdr/html/real_time_spp.html"
+)
+
+ERCOT_LATEST_LMP_URL = (
+    "https://www.ercot.com/content/cdr/html/hb_lz.html"
+)
+
+ERCOT_DAM_SPP_URL = (
+    "https://www.ercot.com/content/cdr/html/dam_spp.html"
+)
+
+ERCOT_DAM_MCPC_URL = (
+    "https://www.ercot.com/content/cdr/html/dam_mcpc.html"
+)
+
+
+class ERCOTHTMLTableParser:
+    """Small standard-library HTML table parser.
+
+    ERCOT's current-day HTML reports use straightforward tables.
+    This parser keeps the app independent of optional pandas HTML
+    parsing dependencies such as lxml / html5lib.
+    """
+
+    def __init__(self):
+        self.tables = []
+        self.current_table = None
+        self.current_row = None
+        self.current_cell = None
+        self.in_cell = False
+
+    def feed(self, html_text):
+        from html.parser import HTMLParser
+
+        parent = self
+
+        class _Parser(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                tag = tag.lower()
+
+                if tag == "table":
+                    parent.current_table = []
+
+                elif tag == "tr" and parent.current_table is not None:
+                    parent.current_row = []
+
+                elif (
+                    tag in ["td", "th"]
+                    and parent.current_row is not None
+                ):
+                    parent.current_cell = []
+                    parent.in_cell = True
+
+                elif tag == "br" and parent.in_cell:
+                    parent.current_cell.append(" ")
+
+            def handle_data(self, data):
+                if parent.in_cell and parent.current_cell is not None:
+                    parent.current_cell.append(data)
+
+            def handle_endtag(self, tag):
+                tag = tag.lower()
+
+                if tag in ["td", "th"] and parent.in_cell:
+                    value = re.sub(
+                        r"\s+",
+                        " ",
+                        "".join(parent.current_cell)
+                    ).strip()
+
+                    parent.current_row.append(value)
+                    parent.current_cell = None
+                    parent.in_cell = False
+
+                elif tag == "tr" and parent.current_row is not None:
+                    if any(clean_text(x) for x in parent.current_row):
+                        parent.current_table.append(parent.current_row)
+
+                    parent.current_row = None
+
+                elif tag == "table" and parent.current_table is not None:
+                    if parent.current_table:
+                        parent.tables.append(parent.current_table)
+
+                    parent.current_table = None
+
+        parser = _Parser()
+        parser.feed(html_text)
+
+
+def parse_ercot_html_table(
+    html_text,
+    required_columns
+):
+    parser = ERCOTHTMLTableParser()
+    parser.feed(html_text)
+
+    required_columns = list(required_columns)
+
+    for table_rows in parser.tables:
+        for header_index, row in enumerate(table_rows):
+            header = [
+                re.sub(r"\s+", " ", clean_text(value)).strip()
+                for value in row
+            ]
+
+            if not all(
+                required in header
+                for required in required_columns
+            ):
+                continue
+
+            width = len(header)
+            data_rows = []
+
+            for data_row in table_rows[
+                header_index + 1:
+            ]:
+                values = [
+                    re.sub(r"\s+", " ", clean_text(value)).strip()
+                    for value in data_row
+                ]
+
+                if len(values) < width:
+                    values = values + [""] * (
+                        width - len(values)
+                    )
+
+                values = values[:width]
+
+                if not any(values):
+                    continue
+
+                # Ignore any repeated header rows embedded in the table.
+                if values == header:
+                    continue
+
+                data_rows.append(values)
+
+            if data_rows:
+                return pd.DataFrame(
+                    data_rows,
+                    columns=header
+                )
+
+    raise ValueError(
+        "ERCOT price table was not found in the returned HTML."
+    )
+
+
+def normalize_ercot_price_table(
+    frame,
+    time_column
+):
+    result = frame.copy()
+
+    if "Oper Day" not in result.columns:
+        raise ValueError(
+            "ERCOT table is missing Oper Day."
+        )
+
+    if time_column not in result.columns:
+        raise ValueError(
+            f"ERCOT table is missing {time_column}."
+        )
+
+    result["Oper Day"] = pd.to_datetime(
+        result["Oper Day"],
+        errors="coerce"
+    )
+
+    for column in result.columns:
+        if column in [
+            "Oper Day",
+            time_column
+        ]:
+            continue
+
+        cleaned = (
+            result[column]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace("$", "", regex=False)
+            .str.strip()
+        )
+
+        result[column] = pd.to_numeric(
+            cleaned,
+            errors="coerce"
+        )
+
+    result = result[
+        result["Oper Day"].notna()
+    ].copy()
+
+    return result
+
+
+def _download_ercot_html(url):
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 ERCOT-Acquisition-Dashboard/1.0"
+            ),
+            "Accept": "text/html,application/xhtml+xml"
+        }
+    )
+
+    with urllib.request.urlopen(
+        request,
+        timeout=15
+    ) as response:
+        return response.read().decode(
+            "utf-8",
+            errors="replace"
+        )
+
+
+def _fetch_first_ercot_table(
+    candidate_urls,
+    time_column,
+    required_columns
+):
+    last_error = None
+
+    for url in candidate_urls:
+        try:
+            html_text = _download_ercot_html(
+                url
+            )
+
+            table = parse_ercot_html_table(
+                html_text,
+                required_columns=required_columns
+            )
+
+            table = normalize_ercot_price_table(
+                table,
+                time_column=time_column
+            )
+
+            if not table.empty:
+                return table, url
+
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+
+    raise ValueError(
+        "No ERCOT market-price table was available."
+    )
+
+
+def _ercot_operating_day_urls(
+    report_name,
+    include_generic=True
+):
+    now_central = pd.Timestamp.now(
+        tz="America/Chicago"
+    )
+
+    today = now_central.normalize()
+    yesterday = today - pd.Timedelta(
+        days=1
+    )
+
+    dated_urls = [
+        (
+            "https://www.ercot.com/content/cdr/html/"
+            f"{day.strftime('%Y%m%d')}_{report_name}.html"
+        )
+        for day in [
+            today,
+            yesterday
+        ]
+    ]
+
+    if include_generic:
+        generic = (
+            "https://www.ercot.com/content/cdr/html/"
+            f"{report_name}.html"
+        )
+
+        return [
+            generic,
+            *dated_urls
+        ]
+
+    return dated_urls
+
+
+@st.cache_data(
+    ttl=300,
+    show_spinner=False
+)
+def fetch_ercot_latest_lmp():
+    html_text = _download_ercot_html(
+        ERCOT_LATEST_LMP_URL
+    )
+
+    table = parse_ercot_html_table(
+        html_text,
+        required_columns=[
+            "Settlement Point",
+            "LMP"
+        ]
+    )
+
+    table["Settlement Point"] = table[
+        "Settlement Point"
+    ].astype(str).str.strip()
+
+    table["LMP"] = pd.to_numeric(
+        table["LMP"]
+        .astype(str)
+        .str.replace(",", "", regex=False)
+        .str.replace("$", "", regex=False)
+        .str.strip(),
+        errors="coerce"
+    )
+
+    table = table[
+        table["Settlement Point"].ne("")
+    ].copy()
+
+    return table, ERCOT_LATEST_LMP_URL
+
+
+@st.cache_data(
+    ttl=300,
+    show_spinner=False
+)
+def fetch_ercot_rt_spp():
+    urls = _ercot_operating_day_urls(
+        "real_time_spp",
+        include_generic=True
+    )
+
+    return _fetch_first_ercot_table(
+        candidate_urls=urls,
+        time_column="Interval Ending",
+        required_columns=[
+            "Oper Day",
+            "Interval Ending",
+            "HB_NORTH"
+        ]
+    )
+
+
+@st.cache_data(
+    ttl=3600,
+    show_spinner=False
+)
+def fetch_ercot_dam_spp():
+    urls = _ercot_operating_day_urls(
+        "dam_spp",
+        include_generic=True
+    )
+
+    return _fetch_first_ercot_table(
+        candidate_urls=urls,
+        time_column="Hour Ending",
+        required_columns=[
+            "Oper Day",
+            "Hour Ending",
+            "HB_NORTH"
+        ]
+    )
+
+
+@st.cache_data(
+    ttl=3600,
+    show_spinner=False
+)
+def fetch_ercot_dam_mcpc():
+    # Date-specific pages are attempted first because the generic
+    # DAM MCPC page may point at the next operating day before
+    # results have cleared.
+    dated_urls = _ercot_operating_day_urls(
+        "dam_mcpc",
+        include_generic=False
+    )
+
+    urls = [
+        *dated_urls,
+        ERCOT_DAM_MCPC_URL
+    ]
+
+    return _fetch_first_ercot_table(
+        candidate_urls=urls,
+        time_column="Hour Ending",
+        required_columns=[
+            "Oper Day",
+            "Hour Ending",
+            "NON-SPIN",
+            "ECRS"
+        ]
+    )
+
+
+def ercot_interval_timestamp(
+    operating_day,
+    interval_ending
+):
+    day = pd.to_datetime(
+        operating_day,
+        errors="coerce"
+    )
+
+    if pd.isna(day):
+        return pd.NaT
+
+    digits = re.sub(
+        r"\D",
+        "",
+        clean_text(interval_ending)
+    )
+
+    if not digits:
+        return pd.NaT
+
+    digits = digits.zfill(4)[-4:]
+
+    try:
+        hour = int(
+            digits[:2]
+        )
+        minute = int(
+            digits[2:]
+        )
+    except Exception:
+        return pd.NaT
+
+    if hour == 24:
+        return (
+            day
+            + pd.Timedelta(days=1)
+            + pd.Timedelta(minutes=minute)
+        )
+
+    return (
+        day
+        + pd.Timedelta(hours=hour)
+        + pd.Timedelta(minutes=minute)
+    )
+
+
+def ercot_hour_timestamp(
+    operating_day,
+    hour_ending
+):
+    day = pd.to_datetime(
+        operating_day,
+        errors="coerce"
+    )
+
+    if pd.isna(day):
+        return pd.NaT
+
+    try:
+        hour = int(
+            float(
+                clean_text(hour_ending)
+            )
+        )
+    except Exception:
+        return pd.NaT
+
+    if hour == 24:
+        return day + pd.Timedelta(
+            days=1
+        )
+
+    return day + pd.Timedelta(
+        hours=hour
+    )
+
+
+def rt_interval_to_hour_ending(
+    interval_ending
+):
+    digits = re.sub(
+        r"\D",
+        "",
+        clean_text(interval_ending)
+    )
+
+    if not digits:
+        return np.nan
+
+    digits = digits.zfill(4)[-4:]
+
+    try:
+        hour = int(
+            digits[:2]
+        )
+        minute = int(
+            digits[2:]
+        )
+    except Exception:
+        return np.nan
+
+    if hour == 24:
+        return 24
+
+    if minute > 0:
+        return hour + 1
+
+    return max(
+        hour,
+        1
+    )
+
+
+def market_price_signal(
+    latest_price,
+    daily_average
+):
+    if pd.isna(latest_price):
+        return "N/A"
+
+    if latest_price < 0:
+        return "Negative"
+
+    if pd.isna(daily_average):
+        return "Current"
+
+    difference = (
+        latest_price
+        - daily_average
+    )
+
+    if difference >= 30:
+        return "Elevated"
+
+    if difference <= -20:
+        return "Soft"
+
+    return "Normal"
+
+
+def price_metric_value(value):
+    if pd.isna(value):
+        return "N/A"
+
+    return f"${value:,.2f}/MWh"
+
+
+# ============================================================
+# ERCOT MARKET PRICES TAB
+#
+# This tab is intentionally rendered BEFORE project CSV loading.
+# The live ERCOT market screen therefore remains useful even if
+# the acquisition-project data file is temporarily unavailable.
+# ============================================================
+market_lmp_df = pd.DataFrame()
+market_rt_df = pd.DataFrame()
+market_dam_df = pd.DataFrame()
+market_mcpc_df = pd.DataFrame()
+market_lmp_source = ""
+market_rt_source = ""
+market_dam_source = ""
+market_mcpc_source = ""
+
+
+with price_tab:
+    st.markdown(
+        "## 📈 ERCOT Market Prices"
+    )
+
+    st.caption(
+        "Live market screen sourced directly from ERCOT public "
+        "Current Day Reports. Real-Time SPP refreshes on a five-minute "
+        "cache; Day-Ahead energy and ancillary-service prices refresh "
+        "hourly. Market data is informational and does not change the "
+        "acquisition Opportunity Score."
+    )
+
+    refresh_col, source_col = st.columns(
+        [1, 4]
+    )
+
+    with refresh_col:
+        refresh_market_prices = st.button(
+            "🔄 Refresh ERCOT Prices",
+            key="refresh_ercot_market_prices"
+        )
+
+    if refresh_market_prices:
+        fetch_ercot_latest_lmp.clear()
+        fetch_ercot_rt_spp.clear()
+        fetch_ercot_dam_spp.clear()
+        fetch_ercot_dam_mcpc.clear()
+        st.rerun()
+
+    with source_col:
+        st.caption(
+            "Latest SCED LMP excludes Real-Time price adders; RT SPP "
+            "includes ERCOT Real-Time Reliability Deployment Price Adders. "
+            "Project-area comparisons use broad hub "
+            "benchmarks and are not node-level project prices."
+        )
+
+    lmp_error = ""
+    rt_error = ""
+    dam_error = ""
+    mcpc_error = ""
+
+    try:
+        market_lmp_df, market_lmp_source = fetch_ercot_latest_lmp()
+
+    except Exception as exc:
+        lmp_error = clean_text(exc)
+
+    try:
+        market_rt_df, market_rt_source = fetch_ercot_rt_spp()
+
+        market_rt_df["Timestamp"] = market_rt_df.apply(
+            lambda row:
+                ercot_interval_timestamp(
+                    row["Oper Day"],
+                    row["Interval Ending"]
+                ),
+            axis=1
+        )
+
+        market_rt_df = market_rt_df[
+            market_rt_df["Timestamp"].notna()
+        ].sort_values(
+            "Timestamp"
+        ).reset_index(
+            drop=True
+        )
+
+    except Exception as exc:
+        rt_error = clean_text(exc)
+
+    try:
+        market_dam_df, market_dam_source = fetch_ercot_dam_spp()
+
+        market_dam_df["Timestamp"] = market_dam_df.apply(
+            lambda row:
+                ercot_hour_timestamp(
+                    row["Oper Day"],
+                    row["Hour Ending"]
+                ),
+            axis=1
+        )
+
+        market_dam_df["Hour Ending Numeric"] = pd.to_numeric(
+            market_dam_df["Hour Ending"],
+            errors="coerce"
+        )
+
+        market_dam_df = market_dam_df[
+            market_dam_df["Timestamp"].notna()
+        ].sort_values(
+            "Timestamp"
+        ).reset_index(
+            drop=True
+        )
+
+    except Exception as exc:
+        dam_error = clean_text(exc)
+
+    try:
+        market_mcpc_df, market_mcpc_source = fetch_ercot_dam_mcpc()
+
+        market_mcpc_df["Timestamp"] = market_mcpc_df.apply(
+            lambda row:
+                ercot_hour_timestamp(
+                    row["Oper Day"],
+                    row["Hour Ending"]
+                ),
+            axis=1
+        )
+
+        market_mcpc_df = market_mcpc_df[
+            market_mcpc_df["Timestamp"].notna()
+        ].sort_values(
+            "Timestamp"
+        ).reset_index(
+            drop=True
+        )
+
+    except Exception as exc:
+        mcpc_error = clean_text(exc)
+
+    if market_rt_df.empty:
+        st.error(
+            "ERCOT Real-Time SPP could not be loaded. "
+            f"{rt_error or 'The public report returned no usable rows.'}"
+        )
+
+    else:
+        latest_rt_row = market_rt_df.iloc[-1]
+
+        latest_rt_timestamp = latest_rt_row[
+            "Timestamp"
+        ]
+
+        current_operating_day = latest_rt_row[
+            "Oper Day"
+        ]
+
+        st.success(
+            "ERCOT Real-Time SPP feed connected. "
+            f"Latest settlement interval: "
+            f"{latest_rt_timestamp.strftime('%m/%d/%Y %H:%M')} CT."
+        )
+
+        major_hubs = [
+            "HB_NORTH",
+            "HB_HOUSTON",
+            "HB_SOUTH",
+            "HB_WEST",
+            "HB_PAN"
+        ]
+
+        major_hubs = [
+            hub
+            for hub in major_hubs
+            if hub in market_rt_df.columns
+        ]
+
+        market_points = [
+            column
+            for column in market_rt_df.columns
+            if (
+                column.startswith("HB_")
+                or column.startswith("LZ_")
+            )
+        ]
+
+        if not market_dam_df.empty:
+            market_points = [
+                point
+                for point in market_points
+                if point in market_dam_df.columns
+            ]
+
+        point_col, view_col = st.columns(
+            [1.5, 1]
+        )
+
+        with point_col:
+            default_point_index = (
+                market_points.index("HB_NORTH")
+                if "HB_NORTH" in market_points
+                else 0
+            )
+
+            selected_market_point = st.selectbox(
+                "Hub / Load Zone",
+                options=market_points,
+                index=default_point_index,
+                key="ercot_market_point"
+            )
+
+        with view_col:
+            chart_window = st.selectbox(
+                "Chart View",
+                options=[
+                    "Today",
+                    "Last 24 Hours Available"
+                ],
+                index=0,
+                key="ercot_market_chart_window"
+            )
+
+        selected_rt = market_rt_df[
+            [
+                "Timestamp",
+                "Oper Day",
+                "Interval Ending",
+                selected_market_point
+            ]
+        ].copy()
+
+        selected_rt = selected_rt[
+            selected_rt[
+                selected_market_point
+            ].notna()
+        ]
+
+        if chart_window == "Today":
+            selected_rt = selected_rt[
+                selected_rt["Oper Day"]
+                == current_operating_day
+            ].copy()
+
+        latest_point_price = (
+            selected_rt[
+                selected_market_point
+            ].iloc[-1]
+            if not selected_rt.empty
+            else np.nan
+        )
+
+        rt_day_average = (
+            selected_rt[
+                selected_market_point
+            ].mean()
+            if not selected_rt.empty
+            else np.nan
+        )
+
+        rt_day_high = (
+            selected_rt[
+                selected_market_point
+            ].max()
+            if not selected_rt.empty
+            else np.nan
+        )
+
+        rt_day_low = (
+            selected_rt[
+                selected_market_point
+            ].min()
+            if not selected_rt.empty
+            else np.nan
+        )
+
+        negative_intervals = (
+            int(
+                (
+                    selected_rt[
+                        selected_market_point
+                    ] < 0
+                ).sum()
+            )
+            if not selected_rt.empty
+            else 0
+        )
+
+        latest_interval = latest_rt_row[
+            "Interval Ending"
+        ]
+
+        latest_hour_ending = rt_interval_to_hour_ending(
+            latest_interval
+        )
+
+        dam_hour_price = np.nan
+        dam_day_average = np.nan
+
+        if (
+            not market_dam_df.empty
+            and selected_market_point in market_dam_df.columns
+        ):
+            dam_operating_day = market_dam_df[
+                "Oper Day"
+            ].max()
+
+            selected_dam = market_dam_df[
+                market_dam_df["Oper Day"]
+                == dam_operating_day
+            ].copy()
+
+            dam_day_average = selected_dam[
+                selected_market_point
+            ].mean()
+
+            matching_dam = selected_dam[
+                selected_dam[
+                    "Hour Ending Numeric"
+                ] == latest_hour_ending
+            ]
+
+            if not matching_dam.empty:
+                dam_hour_price = matching_dam[
+                    selected_market_point
+                ].iloc[-1]
+
+        rt_minus_dam = (
+            latest_point_price
+            - dam_hour_price
+            if (
+                pd.notna(latest_point_price)
+                and pd.notna(dam_hour_price)
+            )
+            else np.nan
+        )
+
+        latest_sced_lmp = np.nan
+
+        if not market_lmp_df.empty:
+            lmp_match = market_lmp_df[
+                market_lmp_df[
+                    "Settlement Point"
+                ] == selected_market_point
+            ]
+
+            if not lmp_match.empty:
+                latest_sced_lmp = lmp_match[
+                    "LMP"
+                ].iloc[-1]
+
+        p1, p2, p3, p4, p5, p6 = st.columns(
+            6
+        )
+
+        p1.metric(
+            "Latest SCED LMP",
+            price_metric_value(
+                latest_sced_lmp
+            )
+        )
+
+        p2.metric(
+            "Latest RT SPP",
+            price_metric_value(
+                latest_point_price
+            )
+        )
+
+        p3.metric(
+            "RT Day Avg",
+            price_metric_value(
+                rt_day_average
+            )
+        )
+
+        p4.metric(
+            f"DAM HE {int(latest_hour_ending) if pd.notna(latest_hour_ending) else 'N/A'}",
+            price_metric_value(
+                dam_hour_price
+            )
+        )
+
+        p5.metric(
+            "RT - DAM",
+            (
+                f"${rt_minus_dam:+,.2f}/MWh"
+                if pd.notna(rt_minus_dam)
+                else "N/A"
+            )
+        )
+
+        p6.metric(
+            "RT Day Range",
+            (
+                f"${rt_day_low:,.2f} – ${rt_day_high:,.2f}"
+                if (
+                    pd.notna(rt_day_low)
+                    and pd.notna(rt_day_high)
+                )
+                else "N/A"
+            )
+        )
+
+        signal = market_price_signal(
+            latest_point_price,
+            rt_day_average
+        )
+
+        st.caption(
+            f"Market signal for {selected_market_point}: "
+            f"**{signal}** | "
+            f"Negative 15-minute intervals in selected view: "
+            f"**{negative_intervals}** | "
+            f"DAM daily average: "
+            f"**{price_metric_value(dam_day_average)}**"
+        )
+
+        # ----------------------------------------------------
+        # HUB SNAPSHOT
+        # ----------------------------------------------------
+        st.markdown(
+            "### Current Hub Snapshot"
+        )
+
+        hub_rows = []
+
+        latest_rt_oper_day = latest_rt_row[
+            "Oper Day"
+        ]
+
+        rt_today = market_rt_df[
+            market_rt_df["Oper Day"]
+            == latest_rt_oper_day
+        ].copy()
+
+        latest_dam_day = (
+            market_dam_df["Oper Day"].max()
+            if not market_dam_df.empty
+            else pd.NaT
+        )
+
+        dam_today = (
+            market_dam_df[
+                market_dam_df["Oper Day"]
+                == latest_dam_day
+            ].copy()
+            if not market_dam_df.empty
+            else pd.DataFrame()
+        )
+
+        for hub in major_hubs:
+            latest_value = latest_rt_row.get(
+                hub,
+                np.nan
+            )
+
+            average_value = rt_today[
+                hub
+            ].mean()
+
+            high_value = rt_today[
+                hub
+            ].max()
+
+            low_value = rt_today[
+                hub
+            ].min()
+
+            hub_dam_avg = (
+                dam_today[hub].mean()
+                if (
+                    not dam_today.empty
+                    and hub in dam_today.columns
+                )
+                else np.nan
+            )
+
+            hub_lmp = np.nan
+
+            if not market_lmp_df.empty:
+                hub_lmp_match = market_lmp_df[
+                    market_lmp_df[
+                        "Settlement Point"
+                    ] == hub
+                ]
+
+                if not hub_lmp_match.empty:
+                    hub_lmp = hub_lmp_match[
+                        "LMP"
+                    ].iloc[-1]
+
+            hub_rows.append(
+                {
+                    "Hub": hub,
+                    "Latest SCED LMP": hub_lmp,
+                    "Latest RT SPP": latest_value,
+                    "RT Day Avg": average_value,
+                    "RT Day High": high_value,
+                    "RT Day Low": low_value,
+                    "DAM Day Avg": hub_dam_avg,
+                    "Signal": market_price_signal(
+                        latest_value,
+                        average_value
+                    )
+                }
+            )
+
+        hub_snapshot = pd.DataFrame(
+            hub_rows
+        )
+
+        st.dataframe(
+            hub_snapshot,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Latest SCED LMP":
+                    st.column_config.NumberColumn(
+                        "Latest SCED LMP ($/MWh)",
+                        format="$%.2f"
+                    ),
+                "Latest RT SPP":
+                    st.column_config.NumberColumn(
+                        "Latest RT SPP ($/MWh)",
+                        format="$%.2f"
+                    ),
+                "RT Day Avg":
+                    st.column_config.NumberColumn(
+                        "RT Day Avg ($/MWh)",
+                        format="$%.2f"
+                    ),
+                "RT Day High":
+                    st.column_config.NumberColumn(
+                        "RT Day High ($/MWh)",
+                        format="$%.2f"
+                    ),
+                "RT Day Low":
+                    st.column_config.NumberColumn(
+                        "RT Day Low ($/MWh)",
+                        format="$%.2f"
+                    ),
+                "DAM Day Avg":
+                    st.column_config.NumberColumn(
+                        "DAM Day Avg ($/MWh)",
+                        format="$%.2f"
+                    )
+            }
+        )
+
+        # ----------------------------------------------------
+        # INTRADAY CHARTS
+        # ----------------------------------------------------
+        chart_left, chart_right = st.columns(
+            2
+        )
+
+        with chart_left:
+            st.markdown(
+                f"### Real-Time SPP — {selected_market_point}"
+            )
+
+            rt_chart = selected_rt[
+                [
+                    "Timestamp",
+                    selected_market_point
+                ]
+            ].rename(
+                columns={
+                    selected_market_point:
+                        "RT SPP ($/MWh)"
+                }
+            )
+
+            if rt_chart.empty:
+                st.info(
+                    "No Real-Time rows are available for this selection."
+                )
+            else:
+                st.line_chart(
+                    rt_chart.set_index(
+                        "Timestamp"
+                    ),
+                    use_container_width=True,
+                    height=360
+                )
+
+        with chart_right:
+            st.markdown(
+                f"### Day-Ahead SPP — {selected_market_point}"
+            )
+
+            if (
+                market_dam_df.empty
+                or selected_market_point not in market_dam_df.columns
+            ):
+                st.info(
+                    "DAM SPP is currently unavailable."
+                )
+            else:
+                dam_chart_day = market_dam_df[
+                    "Oper Day"
+                ].max()
+
+                dam_chart = market_dam_df[
+                    market_dam_df["Oper Day"]
+                    == dam_chart_day
+                ][
+                    [
+                        "Timestamp",
+                        selected_market_point
+                    ]
+                ].copy()
+
+                dam_chart = dam_chart.rename(
+                    columns={
+                        selected_market_point:
+                            "DAM SPP ($/MWh)"
+                    }
+                )
+
+                st.line_chart(
+                    dam_chart.set_index(
+                        "Timestamp"
+                    ),
+                    use_container_width=True,
+                    height=360
+                )
+
+        # ----------------------------------------------------
+        # RAW PRICE TABLE
+        # ----------------------------------------------------
+        with st.expander(
+            "📋 View Current Real-Time Price Intervals",
+            expanded=False
+        ):
+            rt_table_columns = [
+                "Oper Day",
+                "Interval Ending",
+                *major_hubs
+            ]
+
+            rt_table_columns = [
+                column
+                for column in rt_table_columns
+                if column in market_rt_df.columns
+            ]
+
+            st.dataframe(
+                market_rt_df[
+                    rt_table_columns
+                ].tail(40),
+                use_container_width=True,
+                hide_index=True
+            )
+
+    if market_lmp_df.empty and lmp_error:
+        st.caption(
+            "Latest SCED LMP display could not be loaded; "
+            "the RT SPP and DAM sections can still operate. "
+            f"{lmp_error}"
+        )
+
+    # --------------------------------------------------------
+    # DAM ERROR HANDLING
+    # --------------------------------------------------------
+    if (
+        market_dam_df.empty
+        and dam_error
+    ):
+        st.warning(
+            "DAM Settlement Point Prices could not be loaded. "
+            f"{dam_error}"
+        )
+
+    # --------------------------------------------------------
+    # ANCILLARY SERVICES
+    # --------------------------------------------------------
+    st.divider()
+
+    st.markdown(
+        "## 🔋 DAM Ancillary Service Prices"
+    )
+
+    st.caption(
+        "Day-Ahead Market Clearing Price for Capacity (MCPC) for "
+        "Non-Spin, Regulation Down, Regulation Up, RRS and ECRS."
+    )
+
+    if market_mcpc_df.empty:
+        st.info(
+            "Current DAM ancillary-service clearing prices are not "
+            "available from the public report right now. "
+            + (mcpc_error if mcpc_error else "")
+        )
+
+    else:
+        ancillary_columns = [
+            "NON-SPIN",
+            "REG-DOWN",
+            "REG-UP",
+            "RRS",
+            "ECRS"
+        ]
+
+        ancillary_columns = [
+            column
+            for column in ancillary_columns
+            if column in market_mcpc_df.columns
+        ]
+
+        latest_mcpc_day = market_mcpc_df[
+            "Oper Day"
+        ].max()
+
+        mcpc_today = market_mcpc_df[
+            market_mcpc_df["Oper Day"]
+            == latest_mcpc_day
+        ].copy()
+
+        ancillary_summary_rows = []
+
+        for service in ancillary_columns:
+            ancillary_summary_rows.append(
+                {
+                    "Service": service,
+                    "Daily Average": mcpc_today[
+                        service
+                    ].mean(),
+                    "Daily Peak": mcpc_today[
+                        service
+                    ].max(),
+                    "Peak Hour Ending": (
+                        mcpc_today.loc[
+                            mcpc_today[
+                                service
+                            ].idxmax(),
+                            "Hour Ending"
+                        ]
+                        if mcpc_today[
+                            service
+                        ].notna().any()
+                        else np.nan
+                    )
+                }
+            )
+
+        ancillary_summary = pd.DataFrame(
+            ancillary_summary_rows
+        )
+
+        st.dataframe(
+            ancillary_summary,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Daily Average":
+                    st.column_config.NumberColumn(
+                        "Daily Average ($/MW-h)",
+                        format="$%.2f"
+                    ),
+                "Daily Peak":
+                    st.column_config.NumberColumn(
+                        "Daily Peak ($/MW-h)",
+                        format="$%.2f"
+                    )
+            }
+        )
+
+        selected_ancillary = st.selectbox(
+            "Ancillary Service",
+            options=ancillary_columns,
+            index=(
+                ancillary_columns.index("ECRS")
+                if "ECRS" in ancillary_columns
+                else 0
+            ),
+            key="ercot_ancillary_service"
+        )
+
+        mcpc_chart = mcpc_today[
+            [
+                "Timestamp",
+                selected_ancillary
+            ]
+        ].rename(
+            columns={
+                selected_ancillary:
+                    f"{selected_ancillary} MCPC"
+            }
+        )
+
+        st.line_chart(
+            mcpc_chart.set_index(
+                "Timestamp"
+            ),
+            use_container_width=True,
+            height=320
+        )
+
+        with st.expander(
+            "📋 View DAM Ancillary Hourly Prices",
+            expanded=False
+        ):
+            st.dataframe(
+                mcpc_today[
+                    [
+                        "Oper Day",
+                        "Hour Ending",
+                        *ancillary_columns
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # --------------------------------------------------------
+    # SOURCE LINKS
+    # --------------------------------------------------------
+    st.divider()
+
+    st.markdown(
+        "### ERCOT Sources"
+    )
+
+    st.markdown(
+        f"- [Latest SCED LMPs for Load Zones and Trading Hubs]({ERCOT_LATEST_LMP_URL})  \n"
+        f"- [Real-Time Settlement Point Prices]({ERCOT_RT_SPP_URL})  \n"
+        f"- [Day-Ahead Settlement Point Prices]({ERCOT_DAM_SPP_URL})  \n"
+        f"- [DAM Clearing Prices for Capacity]({ERCOT_DAM_MCPC_URL})"
+    )
+
+    st.caption(
+        "ERCOT broad hub and load-zone prices are useful market "
+        "benchmarks, but an individual generation project's realized "
+        "price can differ materially because of nodal basis, congestion, "
+        "curtailment and project-specific settlement mechanics."
+    )
 
 
 # ============================================================
@@ -1055,7 +2463,8 @@ with dashboard_tab:
             **4. ERCOT Area** — Compare market location  
             **5. Bundles** — Multiple 50–60 MW assets by owner  
             **6. Score Breakdown** — Drill into a project  
-            **7. Map Explorer** — View all mapped projects, filter the universe, and drill into a selected project
+            **7. Map Explorer** — View all mapped projects, filter the universe, and drill into a selected project  
+            **8. ERCOT Market Prices** — Monitor live RT SPP, DAM prices, ancillary-service clearing prices, and project-area benchmarks
             """
         )
 
@@ -4857,8 +6266,8 @@ with dashboard_tab:
 # - Multiple independent filters narrow the acquisition universe.
 # - Technology determines marker color.
 # - Top-scored-project filter quickly isolates highest-priority targets.
-# - Selecting one project highlights it and zooms to it without
-#   removing the rest of the filtered universe.
+# - Selecting one project switches to single-project mode so only
+#   that project remains on the map.
 # ============================================================
 with map_tab:
 
@@ -4869,7 +6278,7 @@ with map_tab:
     st.caption(
         "All projects with valid Orennia coordinates are shown by default. "
         "Use the filters to screen by technology, ERCOT area, score, owner, "
-        "development stage and COD. Select a project to highlight and drill down."
+        "development stage and COD. Select a project to isolate it and drill down."
     )
 
     lat_col = (
@@ -5953,3 +7362,207 @@ with map_tab:
                         use_container_width=True,
                         hide_index=True
                     )
+
+
+# ============================================================
+# PROJECT-TO-MARKET BENCHMARK
+#
+# This section is appended after project data has loaded so the
+# live price tab can connect a specific acquisition target to a
+# broad ERCOT hub benchmark. It does NOT change project scoring.
+# ============================================================
+with price_tab:
+    st.divider()
+
+    st.markdown(
+        "## 🎯 Acquisition Project Market Benchmark"
+    )
+
+    st.caption(
+        "Select an acquisition target to compare it with the latest "
+        "broad ERCOT hub price for its area. This is a screening "
+        "benchmark, not the project's nodal settlement price."
+    )
+
+    if market_rt_df.empty:
+        st.info(
+            "Live Real-Time SPP is unavailable, so project market "
+            "benchmarking cannot be shown right now."
+        )
+
+    elif df.empty:
+        st.info(
+            "No acquisition projects are available for benchmarking."
+        )
+
+    else:
+        project_market_options = df.apply(
+            lambda row: (
+                f"{clean_text(row.get('Power Project Name'))} — "
+                f"{clean_text(row.get('Owner')) or 'Unknown Owner'} — "
+                f"{clean_text(row.get('ERCOT Area')) or 'Unknown Area'}"
+            ),
+            axis=1
+        ).tolist()
+
+        selected_project_market_label = st.selectbox(
+            "Project",
+            options=project_market_options,
+            key="market_project_benchmark_selector"
+        )
+
+        selected_project_market_index = project_market_options.index(
+            selected_project_market_label
+        )
+
+        market_project = df.iloc[
+            selected_project_market_index
+        ]
+
+        area_to_hub = {
+            "ERCOT-N": "HB_NORTH",
+            "ERCOT-H": "HB_HOUSTON",
+            "ERCOT-S": "HB_SOUTH",
+            "ERCOT-W": "HB_WEST",
+            "Panhandle": "HB_PAN"
+        }
+
+        project_area = clean_text(
+            market_project.get(
+                "ERCOT Area"
+            )
+        )
+
+        benchmark_hub = area_to_hub.get(
+            project_area
+        )
+
+        if (
+            benchmark_hub is None
+            or benchmark_hub not in market_rt_df.columns
+        ):
+            st.warning(
+                f"No broad hub benchmark is configured for "
+                f"{project_area or 'this project area'}."
+            )
+
+        else:
+            latest_market_day = market_rt_df[
+                "Oper Day"
+            ].max()
+
+            project_rt = market_rt_df[
+                market_rt_df["Oper Day"]
+                == latest_market_day
+            ].copy()
+
+            latest_benchmark = project_rt[
+                benchmark_hub
+            ].dropna()
+
+            latest_benchmark_price = (
+                latest_benchmark.iloc[-1]
+                if not latest_benchmark.empty
+                else np.nan
+            )
+
+            benchmark_average = project_rt[
+                benchmark_hub
+            ].mean()
+
+            benchmark_high = project_rt[
+                benchmark_hub
+            ].max()
+
+            benchmark_low = project_rt[
+                benchmark_hub
+            ].min()
+
+            benchmark_dam_average = np.nan
+
+            if (
+                not market_dam_df.empty
+                and benchmark_hub in market_dam_df.columns
+            ):
+                latest_project_dam_day = market_dam_df[
+                    "Oper Day"
+                ].max()
+
+                benchmark_dam_average = market_dam_df[
+                    market_dam_df["Oper Day"]
+                    == latest_project_dam_day
+                ][
+                    benchmark_hub
+                ].mean()
+
+            b1, b2, b3, b4, b5, b6 = st.columns(
+                6
+            )
+
+            b1.metric(
+                "Project",
+                clean_text(
+                    market_project.get(
+                        "Power Project Name"
+                    )
+                ) or "N/A"
+            )
+
+            b2.metric(
+                "ERCOT Area",
+                project_area or "N/A"
+            )
+
+            b3.metric(
+                "Benchmark Hub",
+                benchmark_hub
+            )
+
+            b4.metric(
+                "Latest RT",
+                price_metric_value(
+                    latest_benchmark_price
+                )
+            )
+
+            b5.metric(
+                "RT Day Avg",
+                price_metric_value(
+                    benchmark_average
+                )
+            )
+
+            b6.metric(
+                "DAM Day Avg",
+                price_metric_value(
+                    benchmark_dam_average
+                )
+            )
+
+            st.caption(
+                f"Today at {benchmark_hub}: high "
+                f"**{price_metric_value(benchmark_high)}**, low "
+                f"**{price_metric_value(benchmark_low)}**. "
+                "This broad benchmark is intentionally not included in "
+                "the automated Opportunity Score yet."
+            )
+
+            project_market_chart = project_rt[
+                [
+                    "Timestamp",
+                    benchmark_hub
+                ]
+            ].rename(
+                columns={
+                    benchmark_hub:
+                        f"{benchmark_hub} RT SPP"
+                }
+            )
+
+            st.line_chart(
+                project_market_chart.set_index(
+                    "Timestamp"
+                ),
+                use_container_width=True,
+                height=320
+            )
