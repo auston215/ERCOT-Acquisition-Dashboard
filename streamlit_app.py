@@ -1108,6 +1108,229 @@ def _ercot_operating_day_urls(
     return dated_urls
 
 
+def _parse_ercot_numeric_value(value):
+    """Convert an ERCOT price cell into a float when possible."""
+    cleaned = (
+        clean_text(value)
+        .replace(",", "")
+        .replace("$", "")
+        .strip()
+    )
+
+    if cleaned == "":
+        return np.nan
+
+    return pd.to_numeric(
+        cleaned,
+        errors="coerce"
+    )
+
+
+def parse_ercot_latest_lmp_table(html_text):
+    """Parse ERCOT's latest hub/load-zone SCED LMP display.
+
+    ERCOT currently renders a multi-row / merged table header on hb_lz.html.
+    The prior generic parser expected one clean header row containing both
+    "Settlement Point" and "LMP", so a header-layout change could make the
+    live feed appear unavailable even though the price rows were present.
+
+    This parser intentionally ignores the header. It looks directly for rows
+    whose first cell is an ERCOT hub or load-zone settlement point (HB_ / LZ_)
+    and treats the following numeric cells as the published SCED values. A
+    second regex fallback is included in case ERCOT alters the table markup
+    while leaving the visible row content intact.
+    """
+    parser = ERCOTHTMLTableParser()
+    parser.feed(html_text)
+
+    rows = []
+
+    for table_rows in parser.tables:
+        for raw_row in table_rows:
+            values = [
+                re.sub(
+                    r"\s+",
+                    " ",
+                    clean_text(value)
+                ).strip()
+                for value in raw_row
+            ]
+
+            if not values:
+                continue
+
+            settlement_point = values[0].upper()
+
+            if not re.fullmatch(
+                r"(?:HB|LZ)_[A-Z0-9_]+",
+                settlement_point
+            ):
+                continue
+
+            numeric_values = [
+                _parse_ercot_numeric_value(value)
+                for value in values[1:]
+            ]
+
+            numeric_values = [
+                value
+                for value in numeric_values
+                if pd.notna(value)
+            ]
+
+            if not numeric_values:
+                continue
+
+            rows.append(
+                {
+                    "Settlement Point": settlement_point,
+                    "LMP": numeric_values[0],
+                    "5 Min Change to LMP": (
+                        numeric_values[1]
+                        if len(numeric_values) > 1
+                        else np.nan
+                    ),
+                    "RTRDPA + LMP": (
+                        numeric_values[2]
+                        if len(numeric_values) > 2
+                        else np.nan
+                    ),
+                    "5 Min Change to RTRDPA + LMP": (
+                        numeric_values[3]
+                        if len(numeric_values) > 3
+                        else np.nan
+                    ),
+                }
+            )
+
+    # Fallback: if the HTML table structure changes, scan the visible HTML
+    # around each HB_ / LZ_ identifier and collect the next numeric values.
+    if not rows:
+        visible_text = html_lib.unescape(
+            re.sub(
+                r"<[^>]+>",
+                " | ",
+                html_text
+            )
+        )
+
+        visible_text = re.sub(
+            r"\s+",
+            " ",
+            visible_text
+        )
+
+        point_matches = list(
+            re.finditer(
+                r"\b(?:HB|LZ)_[A-Z0-9_]+\b",
+                visible_text,
+                flags=re.IGNORECASE
+            )
+        )
+
+        for index, match in enumerate(point_matches):
+            settlement_point = match.group(0).upper()
+
+            segment_end = (
+                point_matches[index + 1].start()
+                if index + 1 < len(point_matches)
+                else min(
+                    len(visible_text),
+                    match.end() + 500
+                )
+            )
+
+            segment = visible_text[
+                match.end():segment_end
+            ]
+
+            number_matches = re.findall(
+                r"(?<![A-Za-z0-9_])[-+]?\$?\d{1,6}(?:,\d{3})*(?:\.\d+)?",
+                segment
+            )
+
+            numeric_values = [
+                _parse_ercot_numeric_value(value)
+                for value in number_matches[:4]
+            ]
+
+            numeric_values = [
+                value
+                for value in numeric_values
+                if pd.notna(value)
+            ]
+
+            if not numeric_values:
+                continue
+
+            rows.append(
+                {
+                    "Settlement Point": settlement_point,
+                    "LMP": numeric_values[0],
+                    "5 Min Change to LMP": (
+                        numeric_values[1]
+                        if len(numeric_values) > 1
+                        else np.nan
+                    ),
+                    "RTRDPA + LMP": (
+                        numeric_values[2]
+                        if len(numeric_values) > 2
+                        else np.nan
+                    ),
+                    "5 Min Change to RTRDPA + LMP": (
+                        numeric_values[3]
+                        if len(numeric_values) > 3
+                        else np.nan
+                    ),
+                }
+            )
+
+    if not rows:
+        raise ValueError(
+            "ERCOT SCED LMP rows were not found in the returned HTML."
+        )
+
+    table = pd.DataFrame(rows)
+
+    table = (
+        table
+        .drop_duplicates(
+            subset=["Settlement Point"],
+            keep="first"
+        )
+        .sort_values(
+            "Settlement Point"
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+    return table
+
+
+def extract_ercot_lmp_last_updated(html_text):
+    """Return ERCOT's displayed SCED update timestamp when available."""
+    visible_text = strip_html(
+        html_text
+    )
+
+    match = re.search(
+        r"Last Updated:\s*"
+        r"([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2})",
+        visible_text,
+        flags=re.IGNORECASE
+    )
+
+    if match is None:
+        return pd.NaT
+
+    return pd.to_datetime(
+        match.group(1),
+        errors="coerce"
+    )
+
+
 @st.cache_data(
     ttl=300,
     show_spinner=False
@@ -1117,30 +1340,15 @@ def fetch_ercot_latest_lmp():
         ERCOT_LATEST_LMP_URL
     )
 
-    table = parse_ercot_html_table(
-        html_text,
-        required_columns=[
-            "Settlement Point",
-            "LMP"
-        ]
+    table = parse_ercot_latest_lmp_table(
+        html_text
     )
 
-    table["Settlement Point"] = table[
-        "Settlement Point"
-    ].astype(str).str.strip()
-
-    table["LMP"] = pd.to_numeric(
-        table["LMP"]
-        .astype(str)
-        .str.replace(",", "", regex=False)
-        .str.replace("$", "", regex=False)
-        .str.strip(),
-        errors="coerce"
+    table["ERCOT Last Updated"] = (
+        extract_ercot_lmp_last_updated(
+            html_text
+        )
     )
-
-    table = table[
-        table["Settlement Point"].ne("")
-    ].copy()
 
     return table, ERCOT_LATEST_LMP_URL
 
