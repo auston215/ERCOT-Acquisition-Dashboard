@@ -1,4 +1,6 @@
 import html as html_lib
+import io
+import json
 import re
 import urllib.parse
 import urllib.request
@@ -6,6 +8,7 @@ import xml.etree.ElementTree as ET
 from datetime import date, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
@@ -830,6 +833,20 @@ ERCOT_DAM_MCPC_URL = (
 )
 
 
+# Historical annual hub / load-zone reports. ERCOT publishes these
+# as public ZIP/XLSX files and refreshes the current-year files weekly.
+ERCOT_HISTORICAL_RTM_REPORT_TYPE_ID = 13061
+ERCOT_HISTORICAL_DAM_REPORT_TYPE_ID = 13060
+
+ERCOT_HISTORICAL_RTM_URL = (
+    "https://www.ercot.com/mp/data-products/data-product-details?id=NP6-785-ER"
+)
+
+ERCOT_HISTORICAL_DAM_URL = (
+    "https://www.ercot.com/mp/data-products/data-product-details?id=NP4-180-ER"
+)
+
+
 class ERCOTHTMLTableParser:
     """Small standard-library HTML table parser.
 
@@ -1571,6 +1588,713 @@ def price_metric_value(value):
         return "N/A"
 
     return f"${value:,.2f}/MWh"
+
+
+# ============================================================
+# ERCOT HISTORICAL HUB / LOAD-ZONE PRICE HELPERS
+#
+# ERCOT's annual historical reports are more efficient for a
+# two-year screen than downloading hundreds of current-day files.
+# Report Type 13061 = Historical RTM Load Zone and Hub Prices.
+# Report Type 13060 = Historical DAM Load Zone and Hub Prices.
+# ============================================================
+def _download_ercot_bytes(url):
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 ERCOT-Acquisition-Dashboard/1.0"
+            ),
+            "Accept": "*/*"
+        }
+    )
+
+    with urllib.request.urlopen(
+        request,
+        timeout=45
+    ) as response:
+        return response.read()
+
+
+def _ercot_document_list(report_type_id):
+    url = (
+        "https://www.ercot.com/misapp/servlets/"
+        "IceDocListJsonWS?reportTypeId="
+        f"{int(report_type_id)}"
+    )
+
+    payload = json.loads(
+        _download_ercot_bytes(url).decode(
+            "utf-8",
+            errors="replace"
+        )
+    )
+
+    return payload.get(
+        "ListDocsByRptTypeRes", {}
+    ).get(
+        "DocumentList", []
+    )
+
+
+def _ercot_historical_document(report_type_id, year):
+    docs = _ercot_document_list(
+        report_type_id
+    )
+
+    candidates = []
+
+    for wrapper in docs:
+        document = wrapper.get(
+            "Document", {}
+        )
+
+        constructed_name = clean_text(
+            document.get(
+                "ConstructedName"
+            )
+        )
+
+        friendly_name = clean_text(
+            document.get(
+                "FriendlyName"
+            )
+        )
+
+        combined_name = (
+            constructed_name
+            + " "
+            + friendly_name
+        ).lower()
+
+        # ERCOT's historical annual reports contain the calendar
+        # year in the constructed file name (for example 2025.zip).
+        if str(int(year)) not in combined_name:
+            continue
+
+        doc_id = clean_text(
+            document.get(
+                "DocID"
+            )
+        )
+
+        if not doc_id:
+            continue
+
+        published = pd.to_datetime(
+            document.get(
+                "PublishDate"
+            ),
+            errors="coerce"
+        )
+
+        candidates.append(
+            {
+                "Doc ID": doc_id,
+                "Constructed Name": constructed_name,
+                "Friendly Name": friendly_name,
+                "Published": published,
+                "URL": (
+                    "https://www.ercot.com/misdownload/servlets/"
+                    "mirDownload?doclookupId="
+                    f"{doc_id}"
+                )
+            }
+        )
+
+    if not candidates:
+        raise ValueError(
+            f"ERCOT historical report {report_type_id} "
+            f"does not currently list a {year} annual file."
+        )
+
+    candidates = sorted(
+        candidates,
+        key=lambda item: (
+            item["Published"]
+            if pd.notna(
+                item["Published"]
+            )
+            else pd.Timestamp.min
+        ),
+        reverse=True
+    )
+
+    return candidates[0]
+
+
+def _read_ercot_historical_excel_zip(document):
+    binary = _download_ercot_bytes(
+        document[
+            "URL"
+        ]
+    )
+
+    with ZipFile(
+        io.BytesIO(binary)
+    ) as archive:
+        excel_names = [
+            name
+            for name in archive.namelist()
+            if name.lower().endswith(
+                (".xlsx", ".xls")
+            )
+        ]
+
+        if not excel_names:
+            raise ValueError(
+                "ERCOT historical ZIP did not contain an Excel file."
+            )
+
+        excel_bytes = archive.read(
+            excel_names[0]
+        )
+
+    try:
+        sheets = pd.read_excel(
+            io.BytesIO(
+                excel_bytes
+            ),
+            sheet_name=None
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "Historical ERCOT Excel files require openpyxl. "
+            "Add openpyxl to requirements.txt for the Streamlit app."
+        ) from exc
+
+    usable = [
+        frame
+        for frame in sheets.values()
+        if isinstance(frame, pd.DataFrame)
+        and not frame.empty
+    ]
+
+    if not usable:
+        raise ValueError(
+            "ERCOT historical workbook contained no usable data."
+        )
+
+    return pd.concat(
+        usable,
+        ignore_index=True
+    )
+
+
+def _normalize_historical_column_name(value):
+    return re.sub(
+        r"[^a-z0-9]",
+        "",
+        clean_text(value).lower()
+    )
+
+
+def _find_historical_column(frame, candidates):
+    normalized = {
+        _normalize_historical_column_name(column): column
+        for column in frame.columns
+    }
+
+    for candidate in candidates:
+        key = _normalize_historical_column_name(
+            candidate
+        )
+
+        if key in normalized:
+            return normalized[key]
+
+    return None
+
+
+def normalize_ercot_historical_prices(
+    frame,
+    market,
+    year
+):
+    data = frame.copy()
+
+    delivery_date_col = _find_historical_column(
+        data,
+        [
+            "Delivery Date",
+            "DeliveryDate",
+            "Oper Day",
+            "OperDay",
+            "Date"
+        ]
+    )
+
+    delivery_hour_col = _find_historical_column(
+        data,
+        [
+            "Delivery Hour",
+            "DeliveryHour",
+            "Hour Ending",
+            "HourEnding"
+        ]
+    )
+
+    delivery_interval_col = _find_historical_column(
+        data,
+        [
+            "Delivery Interval",
+            "DeliveryInterval"
+        ]
+    )
+
+    location_col = _find_historical_column(
+        data,
+        [
+            "Settlement Point Name",
+            "SettlementPointName",
+            "Settlement Point",
+            "SettlementPoint",
+            "Location"
+        ]
+    )
+
+    price_col = _find_historical_column(
+        data,
+        [
+            "Settlement Point Price",
+            "SettlementPointPrice",
+            "SPP",
+            "Price"
+        ]
+    )
+
+    required = {
+        "Delivery Date": delivery_date_col,
+        "Delivery Hour": delivery_hour_col,
+        "Settlement Point": location_col,
+        "SPP": price_col
+    }
+
+    missing = [
+        label
+        for label, column in required.items()
+        if column is None
+    ]
+
+    if missing:
+        raise ValueError(
+            "Historical ERCOT workbook is missing expected fields: "
+            + ", ".join(missing)
+        )
+
+    result = pd.DataFrame(
+        {
+            "Delivery Date": pd.to_datetime(
+                data[
+                    delivery_date_col
+                ],
+                errors="coerce"
+            ),
+            "Delivery Hour": pd.to_numeric(
+                data[
+                    delivery_hour_col
+                ],
+                errors="coerce"
+            ),
+            "Settlement Point": (
+                data[
+                    location_col
+                ]
+                .astype(str)
+                .str.strip()
+                .str.upper()
+            ),
+            "SPP": pd.to_numeric(
+                data[
+                    price_col
+                ],
+                errors="coerce"
+            )
+        }
+    )
+
+    if delivery_interval_col is not None:
+        result[
+            "Delivery Interval"
+        ] = pd.to_numeric(
+            data[
+                delivery_interval_col
+            ],
+            errors="coerce"
+        )
+    else:
+        result[
+            "Delivery Interval"
+        ] = np.nan
+
+    result = result[
+        result[
+            "Delivery Date"
+        ].notna()
+        &
+        result[
+            "Delivery Hour"
+        ].notna()
+        &
+        result[
+            "Settlement Point"
+        ].str.startswith(
+            ("HB_", "LZ_")
+        )
+        &
+        result[
+            "SPP"
+        ].notna()
+    ].copy()
+
+    if result.empty:
+        raise ValueError(
+            f"ERCOT historical {market} workbook for {year} "
+            "contained no usable hub/load-zone rows."
+        )
+
+    # Build a naive Central-clock timestamp for charting. The
+    # delivery date remains separately available for daily grouping,
+    # which avoids DST edge cases affecting daily price statistics.
+    hour_beginning = (
+        result[
+            "Delivery Hour"
+        ]
+        - 1
+    ).clip(
+        lower=0
+    )
+
+    result[
+        "Timestamp"
+    ] = (
+        result[
+            "Delivery Date"
+        ]
+        + pd.to_timedelta(
+            hour_beginning,
+            unit="h"
+        )
+    )
+
+    if market == "RT":
+        interval_number = result[
+            "Delivery Interval"
+        ].fillna(
+            1
+        )
+
+        result[
+            "Timestamp"
+        ] = (
+            result[
+                "Timestamp"
+            ]
+            + pd.to_timedelta(
+                (
+                    interval_number
+                    - 1
+                )
+                * 15,
+                unit="m"
+            )
+        )
+
+    result[
+        "Market"
+    ] = market
+
+    result[
+        "Source Year"
+    ] = int(
+        year
+    )
+
+    return result[
+        [
+            "Timestamp",
+            "Delivery Date",
+            "Delivery Hour",
+            "Delivery Interval",
+            "Settlement Point",
+            "Market",
+            "SPP",
+            "Source Year"
+        ]
+    ].sort_values(
+        [
+            "Timestamp",
+            "Settlement Point"
+        ]
+    ).reset_index(
+        drop=True
+    )
+
+
+@st.cache_data(
+    ttl=6 * 60 * 60,
+    show_spinner=False
+)
+def fetch_ercot_historical_year(
+    market,
+    year
+):
+    market = clean_text(
+        market
+    ).upper()
+
+    if market == "RT":
+        report_type_id = (
+            ERCOT_HISTORICAL_RTM_REPORT_TYPE_ID
+        )
+    elif market == "DAM":
+        report_type_id = (
+            ERCOT_HISTORICAL_DAM_REPORT_TYPE_ID
+        )
+    else:
+        raise ValueError(
+            "Historical market must be RT or DAM."
+        )
+
+    document = _ercot_historical_document(
+        report_type_id,
+        int(year)
+    )
+
+    raw = _read_ercot_historical_excel_zip(
+        document
+    )
+
+    normalized = normalize_ercot_historical_prices(
+        raw,
+        market=market,
+        year=int(year)
+    )
+
+    return normalized, document
+
+
+def historical_window_start(label, now_central):
+    if label == "3M":
+        return now_central - pd.DateOffset(
+            months=3
+        )
+
+    if label == "6M":
+        return now_central - pd.DateOffset(
+            months=6
+        )
+
+    if label == "1Y":
+        return now_central - pd.DateOffset(
+            years=1
+        )
+
+    return now_central - pd.DateOffset(
+        years=2
+    )
+
+
+def load_ercot_historical_window(
+    market,
+    window_label
+):
+    now_central = pd.Timestamp.now(
+        tz="America/Chicago"
+    ).tz_localize(
+        None
+    )
+
+    start = historical_window_start(
+        window_label,
+        now_central
+    )
+
+    years = list(
+        range(
+            int(start.year),
+            int(now_central.year) + 1
+        )
+    )
+
+    frames = []
+    documents = []
+    errors = []
+
+    for year in years:
+        try:
+            frame, document = fetch_ercot_historical_year(
+                market,
+                year
+            )
+
+            frames.append(
+                frame
+            )
+
+            documents.append(
+                document
+            )
+
+        except Exception as exc:
+            errors.append(
+                f"{year}: {clean_text(exc)}"
+            )
+
+    if not frames:
+        return (
+            pd.DataFrame(),
+            documents,
+            errors,
+            start,
+            now_central
+        )
+
+    combined = pd.concat(
+        frames,
+        ignore_index=True
+    )
+
+    combined = combined[
+        (
+            combined[
+                "Timestamp"
+            ] >= start
+        )
+        &
+        (
+            combined[
+                "Timestamp"
+            ] <= now_central
+        )
+    ].copy()
+
+    return (
+        combined,
+        documents,
+        errors,
+        start,
+        now_central
+    )
+
+
+def aggregate_historical_price_series(
+    frame,
+    frequency
+):
+    if frame.empty:
+        return pd.DataFrame()
+
+    data = frame[
+        [
+            "Timestamp",
+            "SPP"
+        ]
+    ].copy()
+
+    data = data.set_index(
+        "Timestamp"
+    )
+
+    rule = {
+        "Daily": "D",
+        "Weekly": "W",
+        "Monthly": "MS"
+    }.get(
+        frequency,
+        "MS"
+    )
+
+    return data.resample(
+        rule
+    )[
+        "SPP"
+    ].mean().to_frame(
+        "Average Price"
+    )
+
+
+def historical_price_statistics(frame):
+    if frame.empty:
+        return {
+            "Average": np.nan,
+            "Median": np.nan,
+            "P95": np.nan,
+            "Maximum": np.nan,
+            "Volatility": np.nan,
+            "Negative %": np.nan,
+            ">$100 %": np.nan,
+            "Average Daily Spread": np.nan
+        }
+
+    prices = pd.to_numeric(
+        frame[
+            "SPP"
+        ],
+        errors="coerce"
+    ).dropna()
+
+    daily = (
+        frame.groupby(
+            "Delivery Date"
+        )[
+            "SPP"
+        ]
+        .agg(
+            [
+                "min",
+                "max"
+            ]
+        )
+    )
+
+    daily[
+        "Spread"
+    ] = (
+        daily[
+            "max"
+        ]
+        - daily[
+            "min"
+        ]
+    )
+
+    if prices.empty:
+        return {
+            "Average": np.nan,
+            "Median": np.nan,
+            "P95": np.nan,
+            "Maximum": np.nan,
+            "Volatility": np.nan,
+            "Negative %": np.nan,
+            ">$100 %": np.nan,
+            "Average Daily Spread": np.nan
+        }
+
+    return {
+        "Average": prices.mean(),
+        "Median": prices.median(),
+        "P95": prices.quantile(
+            0.95
+        ),
+        "Maximum": prices.max(),
+        "Volatility": prices.std(),
+        "Negative %": (
+            (
+                prices < 0
+            ).mean()
+            * 100
+        ),
+        ">$100 %": (
+            (
+                prices > 100
+            ).mean()
+            * 100
+        ),
+        "Average Daily Spread": daily[
+            "Spread"
+        ].mean()
+    }
 
 
 # ============================================================
@@ -2389,6 +3113,694 @@ with price_tab:
             )
 
     # --------------------------------------------------------
+    # HISTORICAL MARKET PERFORMANCE
+    # --------------------------------------------------------
+    st.divider()
+
+    st.markdown(
+        "## 📊 Historical Market Performance"
+    )
+
+    st.caption(
+        "Historical ERCOT hub and load-zone prices sourced from the "
+        "annual Historical RTM and DAM reports. The current-year annual "
+        "files are updated weekly, so use the live section above for the "
+        "latest intraday conditions. Historical analytics are informational "
+        "and do not change the acquisition Opportunity Score."
+    )
+
+    hist_c1, hist_c2, hist_c3 = st.columns(
+        [1, 1.2, 1]
+    )
+
+    with hist_c1:
+        historical_window = st.selectbox(
+            "Historical Period",
+            options=[
+                "3M",
+                "6M",
+                "1Y",
+                "2Y"
+            ],
+            index=3,
+            key="ercot_historical_window"
+        )
+
+    with hist_c2:
+        historical_market = st.selectbox(
+            "Historical Market",
+            options=[
+                "Both RT + DAM",
+                "Real-Time",
+                "Day-Ahead"
+            ],
+            index=0,
+            key="ercot_historical_market"
+        )
+
+    with hist_c3:
+        historical_aggregation = st.selectbox(
+            "Trend Aggregation",
+            options=[
+                "Daily",
+                "Weekly",
+                "Monthly"
+            ],
+            index=2,
+            key="ercot_historical_aggregation"
+        )
+
+    # Use the live-market point selector when it exists so the historical
+    # view follows the user's current hub / load-zone selection.
+    historical_point_options = []
+
+    if not market_rt_df.empty:
+        historical_point_options.extend(
+            [
+                column
+                for column in market_rt_df.columns
+                if column.startswith(
+                    ("HB_", "LZ_")
+                )
+            ]
+        )
+
+    if not market_dam_df.empty:
+        historical_point_options.extend(
+            [
+                column
+                for column in market_dam_df.columns
+                if column.startswith(
+                    ("HB_", "LZ_")
+                )
+            ]
+        )
+
+    historical_point_options = sorted(
+        set(
+            historical_point_options
+        )
+    )
+
+    if not historical_point_options:
+        historical_point_options = [
+            "HB_NORTH",
+            "HB_HOUSTON",
+            "HB_SOUTH",
+            "HB_WEST",
+            "HB_PAN",
+            "LZ_NORTH",
+            "LZ_HOUSTON",
+            "LZ_SOUTH",
+            "LZ_WEST"
+        ]
+
+    default_historical_point = (
+        selected_market_point
+        if (
+            "selected_market_point" in locals()
+            and selected_market_point in historical_point_options
+        )
+        else (
+            "HB_NORTH"
+            if "HB_NORTH" in historical_point_options
+            else historical_point_options[0]
+        )
+    )
+
+    historical_point = st.selectbox(
+        "Historical Hub / Load Zone",
+        options=historical_point_options,
+        index=historical_point_options.index(
+            default_historical_point
+        ),
+        key="ercot_historical_point"
+    )
+
+    historical_rt = pd.DataFrame()
+    historical_dam = pd.DataFrame()
+    historical_messages = []
+    historical_documents = []
+
+    markets_to_load = []
+
+    if historical_market in [
+        "Both RT + DAM",
+        "Real-Time"
+    ]:
+        markets_to_load.append(
+            "RT"
+        )
+
+    if historical_market in [
+        "Both RT + DAM",
+        "Day-Ahead"
+    ]:
+        markets_to_load.append(
+            "DAM"
+        )
+
+    with st.spinner(
+        "Loading ERCOT historical annual price files..."
+    ):
+        for historical_market_code in markets_to_load:
+            (
+                historical_frame,
+                historical_docs,
+                historical_errors,
+                historical_start,
+                historical_end
+            ) = load_ercot_historical_window(
+                historical_market_code,
+                historical_window
+            )
+
+            historical_documents.extend(
+                historical_docs
+            )
+
+            historical_messages.extend(
+                [
+                    f"{historical_market_code} {message}"
+                    for message in historical_errors
+                ]
+            )
+
+            if not historical_frame.empty:
+                historical_frame = historical_frame[
+                    historical_frame[
+                        "Settlement Point"
+                    ] == historical_point
+                ].copy()
+
+            if historical_market_code == "RT":
+                historical_rt = historical_frame
+            else:
+                historical_dam = historical_frame
+
+    if historical_rt.empty and historical_dam.empty:
+        st.warning(
+            "Historical ERCOT prices could not be loaded for this "
+            "selection. The live-price section above remains available."
+        )
+
+        if historical_messages:
+            with st.expander(
+                "Historical data diagnostics",
+                expanded=False
+            ):
+                for message in historical_messages:
+                    st.caption(
+                        message
+                    )
+
+    else:
+        actual_start_dates = []
+
+        if not historical_rt.empty:
+            actual_start_dates.append(
+                historical_rt[
+                    "Timestamp"
+                ].min()
+            )
+
+        if not historical_dam.empty:
+            actual_start_dates.append(
+                historical_dam[
+                    "Timestamp"
+                ].min()
+            )
+
+        actual_end_dates = []
+
+        if not historical_rt.empty:
+            actual_end_dates.append(
+                historical_rt[
+                    "Timestamp"
+                ].max()
+            )
+
+        if not historical_dam.empty:
+            actual_end_dates.append(
+                historical_dam[
+                    "Timestamp"
+                ].max()
+            )
+
+        if actual_start_dates and actual_end_dates:
+            st.success(
+                f"Historical {historical_point} data loaded from "
+                f"{min(actual_start_dates).strftime('%m/%d/%Y')} through "
+                f"{max(actual_end_dates).strftime('%m/%d/%Y')}."
+            )
+
+        rt_stats = historical_price_statistics(
+            historical_rt
+        )
+
+        dam_stats = historical_price_statistics(
+            historical_dam
+        )
+
+        stat_source = (
+            rt_stats
+            if not historical_rt.empty
+            else dam_stats
+        )
+
+        avg_rt_dam_spread = np.nan
+
+        if (
+            not historical_rt.empty
+            and not historical_dam.empty
+        ):
+            rt_daily_mean = (
+                historical_rt.groupby(
+                    "Delivery Date"
+                )[
+                    "SPP"
+                ].mean()
+            )
+
+            dam_daily_mean = (
+                historical_dam.groupby(
+                    "Delivery Date"
+                )[
+                    "SPP"
+                ].mean()
+            )
+
+            common_dates = rt_daily_mean.index.intersection(
+                dam_daily_mean.index
+            )
+
+            if len(common_dates) > 0:
+                avg_rt_dam_spread = (
+                    rt_daily_mean.loc[
+                        common_dates
+                    ]
+                    - dam_daily_mean.loc[
+                        common_dates
+                    ]
+                ).mean()
+
+        hs1, hs2, hs3, hs4 = st.columns(
+            4
+        )
+
+        hs1.metric(
+            "Average Price",
+            price_metric_value(
+                stat_source[
+                    "Average"
+                ]
+            )
+        )
+
+        hs2.metric(
+            "Median Price",
+            price_metric_value(
+                stat_source[
+                    "Median"
+                ]
+            )
+        )
+
+        hs3.metric(
+            "P95 Price",
+            price_metric_value(
+                stat_source[
+                    "P95"
+                ]
+            )
+        )
+
+        hs4.metric(
+            "Maximum Price",
+            price_metric_value(
+                stat_source[
+                    "Maximum"
+                ]
+            )
+        )
+
+        hs5, hs6, hs7, hs8 = st.columns(
+            4
+        )
+
+        hs5.metric(
+            "Negative Price Frequency",
+            (
+                f"{stat_source['Negative %']:.2f}%"
+                if pd.notna(
+                    stat_source[
+                        "Negative %"
+                    ]
+                )
+                else "N/A"
+            )
+        )
+
+        hs6.metric(
+            "Intervals > $100/MWh",
+            (
+                f"{stat_source['>$100 %']:.2f}%"
+                if pd.notna(
+                    stat_source[
+                        ">$100 %"
+                    ]
+                )
+                else "N/A"
+            )
+        )
+
+        hs7.metric(
+            "Price Volatility",
+            price_metric_value(
+                stat_source[
+                    "Volatility"
+                ]
+            )
+        )
+
+        hs8.metric(
+            "Avg Daily High-Low Spread",
+            price_metric_value(
+                stat_source[
+                    "Average Daily Spread"
+                ]
+            )
+        )
+
+        if pd.notna(
+            avg_rt_dam_spread
+        ):
+            st.caption(
+                f"Average daily RT minus DAM price spread over the "
+                f"overlapping period: **${avg_rt_dam_spread:+,.2f}/MWh**."
+            )
+
+        # ----------------------------------------------------
+        # RT / DAM TREND
+        # ----------------------------------------------------
+        st.markdown(
+            f"### {historical_window} Price Trend — {historical_point}"
+        )
+
+        trend_frames = []
+
+        if not historical_rt.empty:
+            rt_trend = aggregate_historical_price_series(
+                historical_rt,
+                historical_aggregation
+            ).rename(
+                columns={
+                    "Average Price": "RT SPP"
+                }
+            )
+
+            trend_frames.append(
+                rt_trend
+            )
+
+        if not historical_dam.empty:
+            dam_trend = aggregate_historical_price_series(
+                historical_dam,
+                historical_aggregation
+            ).rename(
+                columns={
+                    "Average Price": "DAM SPP"
+                }
+            )
+
+            trend_frames.append(
+                dam_trend
+            )
+
+        if trend_frames:
+            historical_trend = pd.concat(
+                trend_frames,
+                axis=1
+            ).sort_index()
+
+            st.line_chart(
+                historical_trend,
+                use_container_width=True,
+                height=380
+            )
+
+        # ----------------------------------------------------
+        # MONTHLY PRICE CHARACTERISTICS
+        # ----------------------------------------------------
+        chart_hist_left, chart_hist_right = st.columns(
+            2
+        )
+
+        with chart_hist_left:
+            st.markdown(
+                "### Monthly Negative Pricing"
+            )
+
+            negative_source = (
+                historical_rt
+                if not historical_rt.empty
+                else historical_dam
+            )
+
+            if not negative_source.empty:
+                negative_monthly = (
+                    negative_source.assign(
+                        Negative=(
+                            negative_source[
+                                "SPP"
+                            ] < 0
+                        ).astype(float)
+                    )
+                    .set_index(
+                        "Timestamp"
+                    )[
+                        "Negative"
+                    ]
+                    .resample(
+                        "MS"
+                    )
+                    .mean()
+                    .mul(
+                        100
+                    )
+                    .to_frame(
+                        "Negative Intervals (%)"
+                    )
+                )
+
+                st.bar_chart(
+                    negative_monthly,
+                    use_container_width=True,
+                    height=320
+                )
+
+        with chart_hist_right:
+            st.markdown(
+                "### BESS Daily Price Spread"
+            )
+
+            spread_source = (
+                historical_rt
+                if not historical_rt.empty
+                else historical_dam
+            )
+
+            if not spread_source.empty:
+                daily_spread = (
+                    spread_source.groupby(
+                        "Delivery Date"
+                    )[
+                        "SPP"
+                    ]
+                    .agg(
+                        [
+                            "min",
+                            "max"
+                        ]
+                    )
+                )
+
+                daily_spread[
+                    "Daily Spread ($/MWh)"
+                ] = (
+                    daily_spread[
+                        "max"
+                    ]
+                    - daily_spread[
+                        "min"
+                    ]
+                )
+
+                monthly_spread = (
+                    daily_spread[
+                        [
+                            "Daily Spread ($/MWh)"
+                        ]
+                    ]
+                    .resample(
+                        "MS"
+                    )
+                    .mean()
+                )
+
+                st.line_chart(
+                    monthly_spread,
+                    use_container_width=True,
+                    height=320
+                )
+
+                st.caption(
+                    "Daily spread = highest interval price minus lowest "
+                    "interval price for the operating day. This is a "
+                    "market-volatility screen, not a modeled BESS revenue stack."
+                )
+
+        # ----------------------------------------------------
+        # MONTHLY SUMMARY TABLE
+        # ----------------------------------------------------
+        with st.expander(
+            "📋 View Historical Monthly Statistics",
+            expanded=False
+        ):
+            summary_source = (
+                historical_rt
+                if not historical_rt.empty
+                else historical_dam
+            ).copy()
+
+            summary_source[
+                "Month"
+            ] = summary_source[
+                "Timestamp"
+            ].dt.to_period(
+                "M"
+            ).dt.to_timestamp()
+
+            monthly_summary = (
+                summary_source.groupby(
+                    "Month",
+                    as_index=False
+                )[
+                    "SPP"
+                ]
+                .agg(
+                    Average="mean",
+                    Median="median",
+                    Low="min",
+                    High="max",
+                    Volatility="std"
+                )
+            )
+
+            negative_by_month = (
+                summary_source.assign(
+                    Negative=(
+                        summary_source[
+                            "SPP"
+                        ] < 0
+                    ).astype(float),
+                    Over100=(
+                        summary_source[
+                            "SPP"
+                        ] > 100
+                    ).astype(float)
+                )
+                .groupby(
+                    "Month",
+                    as_index=False
+                )[[
+                    "Negative",
+                    "Over100"
+                ]]
+                .mean()
+            )
+
+            negative_by_month[
+                "Negative %"
+            ] = negative_by_month[
+                "Negative"
+            ] * 100
+
+            negative_by_month[
+                ">$100 %"
+            ] = negative_by_month[
+                "Over100"
+            ] * 100
+
+            monthly_summary = monthly_summary.merge(
+                negative_by_month[
+                    [
+                        "Month",
+                        "Negative %",
+                        ">$100 %"
+                    ]
+                ],
+                on="Month",
+                how="left"
+            )
+
+            st.dataframe(
+                monthly_summary,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Month": st.column_config.DateColumn(
+                        "Month",
+                        format="MMM YYYY"
+                    ),
+                    "Average": st.column_config.NumberColumn(
+                        "Average ($/MWh)",
+                        format="$%.2f"
+                    ),
+                    "Median": st.column_config.NumberColumn(
+                        "Median ($/MWh)",
+                        format="$%.2f"
+                    ),
+                    "Low": st.column_config.NumberColumn(
+                        "Low ($/MWh)",
+                        format="$%.2f"
+                    ),
+                    "High": st.column_config.NumberColumn(
+                        "High ($/MWh)",
+                        format="$%.2f"
+                    ),
+                    "Volatility": st.column_config.NumberColumn(
+                        "Volatility",
+                        format="$%.2f"
+                    ),
+                    "Negative %": st.column_config.NumberColumn(
+                        "Negative %",
+                        format="%.2f%%"
+                    ),
+                    ">$100 %": st.column_config.NumberColumn(
+                        ">$100 %",
+                        format="%.2f%%"
+                    )
+                }
+            )
+
+        if historical_messages:
+            with st.expander(
+                "Historical data diagnostics",
+                expanded=False
+            ):
+                for message in historical_messages:
+                    st.caption(
+                        message
+                    )
+
+    st.caption(
+        "Historical annual price files are designed for trend and "
+        "screening analysis. ERCOT's live current-day reports above "
+        "remain the source for the latest market conditions."
+    )
+
+    # --------------------------------------------------------
     # SOURCE LINKS
     # --------------------------------------------------------
     st.divider()
@@ -2401,7 +3813,9 @@ with price_tab:
         f"- [Latest SCED LMPs for Load Zones and Trading Hubs]({ERCOT_LATEST_LMP_URL})  \n"
         f"- [Real-Time Settlement Point Prices]({ERCOT_RT_SPP_URL})  \n"
         f"- [Day-Ahead Settlement Point Prices]({ERCOT_DAM_SPP_URL})  \n"
-        f"- [DAM Clearing Prices for Capacity]({ERCOT_DAM_MCPC_URL})"
+        f"- [DAM Clearing Prices for Capacity]({ERCOT_DAM_MCPC_URL})  \n"
+        f"- [Historical RTM Load Zone and Hub Prices]({ERCOT_HISTORICAL_RTM_URL})  \n"
+        f"- [Historical DAM Load Zone and Hub Prices]({ERCOT_HISTORICAL_DAM_URL})"
     )
 
     st.caption(
