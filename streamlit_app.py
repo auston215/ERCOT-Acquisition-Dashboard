@@ -2,6 +2,7 @@ import html as html_lib
 import io
 import json
 import re
+import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -1598,51 +1599,168 @@ def price_metric_value(value):
 # Report Type 13061 = Historical RTM Load Zone and Hub Prices.
 # Report Type 13060 = Historical DAM Load Zone and Hub Prices.
 # ============================================================
-def _download_ercot_bytes(url):
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 ERCOT-Acquisition-Dashboard/1.0"
-            ),
-            "Accept": "*/*"
-        }
+def _download_ercot_bytes(
+    url,
+    accept="*/*",
+    referer=None,
+    timeout=120,
+    retries=3
+):
+    """Download ERCOT content with browser/XHR-like headers and retries.
+
+    ERCOT's document-list service is an XHR endpoint and can be more
+    sensitive to request headers/cache behavior than the current-day HTML
+    pages. Historical ZIP files can also be large, so they receive a longer
+    timeout than the live-price pages.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/152.0 Safari/537.36"
+        ),
+        "Accept": accept,
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
+    if referer:
+        headers["Referer"] = referer
+
+    last_error = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            request = urllib.request.Request(
+                url,
+                headers=headers
+            )
+
+            with urllib.request.urlopen(
+                request,
+                timeout=timeout
+            ) as response:
+                return response.read()
+
+        except Exception as exc:
+            last_error = exc
+
+            if attempt < retries:
+                time.sleep(
+                    min(
+                        2 ** (attempt - 1),
+                        4
+                    )
+                )
+
+    raise RuntimeError(
+        f"ERCOT download failed after {retries} attempts: "
+        f"{clean_text(last_error)}"
     )
 
-    with urllib.request.urlopen(
-        request,
-        timeout=45
-    ) as response:
-        return response.read()
+
+def _ercot_historical_product_url(report_type_id):
+    if int(report_type_id) == ERCOT_HISTORICAL_RTM_REPORT_TYPE_ID:
+        return ERCOT_HISTORICAL_RTM_URL
+
+    if int(report_type_id) == ERCOT_HISTORICAL_DAM_REPORT_TYPE_ID:
+        return ERCOT_HISTORICAL_DAM_URL
+
+    return "https://www.ercot.com/mp/data-products"
 
 
 def _ercot_document_list(report_type_id):
+    """Return ERCOT document metadata for a public report type.
+
+    Important: the cache-buster and X-Requested-With header mirror the
+    request ERCOT's own data-product page makes. The previous implementation
+    omitted both, which can cause the endpoint to return stale/empty/non-JSON
+    content in deployed Streamlit environments.
+    """
+    cache_buster = int(
+        time.time() * 1000
+    )
+
     url = (
         "https://www.ercot.com/misapp/servlets/"
         "IceDocListJsonWS?reportTypeId="
         f"{int(report_type_id)}"
+        f"&_={cache_buster}"
     )
 
-    payload = json.loads(
-        _download_ercot_bytes(url).decode(
+    referer = _ercot_historical_product_url(
+        report_type_id
+    )
+
+    raw = _download_ercot_bytes(
+        url,
+        accept=(
+            "application/json, text/javascript, */*; q=0.01"
+        ),
+        referer=referer,
+        timeout=30,
+        retries=3
+    )
+
+    stripped = raw.lstrip()
+
+    if not stripped.startswith(
+        (b"{", b"[")
+    ):
+        preview = raw[:180].decode(
             "utf-8",
             errors="replace"
         )
-    )
 
-    return payload.get(
+        raise RuntimeError(
+            "ERCOT historical document-list endpoint returned "
+            "non-JSON content. Response preview: "
+            + re.sub(
+                r"\s+",
+                " ",
+                preview
+            ).strip()
+        )
+
+    try:
+        payload = json.loads(
+            raw.decode(
+                "utf-8",
+                errors="replace"
+            )
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "ERCOT historical document-list JSON could not be parsed: "
+            f"{clean_text(exc)}"
+        ) from exc
+
+    docs = payload.get(
         "ListDocsByRptTypeRes", {}
     ).get(
         "DocumentList", []
     )
 
+    if not isinstance(
+        docs,
+        list
+    ) or not docs:
+        raise ValueError(
+            f"ERCOT report type {report_type_id} returned no documents."
+        )
+
+    return docs
+
 
 def _ercot_historical_document(report_type_id, year):
+    """Find the newest annual ERCOT ZIP for the requested calendar year."""
     docs = _ercot_document_list(
         report_type_id
     )
 
-    candidates = []
+    exact_candidates = []
+    fallback_candidates = []
 
     for wrapper in docs:
         document = wrapper.get(
@@ -1665,12 +1783,7 @@ def _ercot_historical_document(report_type_id, year):
             constructed_name
             + " "
             + friendly_name
-        ).lower()
-
-        # ERCOT's historical annual reports contain the calendar
-        # year in the constructed file name (for example 2025.zip).
-        if str(int(year)) not in combined_name:
-            continue
+        )
 
         doc_id = clean_text(
             document.get(
@@ -1688,24 +1801,51 @@ def _ercot_historical_document(report_type_id, year):
             errors="coerce"
         )
 
-        candidates.append(
-            {
-                "Doc ID": doc_id,
-                "Constructed Name": constructed_name,
-                "Friendly Name": friendly_name,
-                "Published": published,
-                "URL": (
-                    "https://www.ercot.com/misdownload/servlets/"
-                    "mirDownload?doclookupId="
-                    f"{doc_id}"
-                )
-            }
-        )
+        candidate = {
+            "Doc ID": doc_id,
+            "Constructed Name": constructed_name,
+            "Friendly Name": friendly_name,
+            "Published": published,
+            "URL": (
+                "https://www.ercot.com/misdownload/servlets/"
+                "mirDownload?doclookupId="
+                f"{doc_id}"
+            )
+        }
+
+        # This is the same matching convention used by gridstatus's
+        # maintained ERCOT adapter for these annual reports.
+        if f"{int(year)}.zip" in constructed_name:
+            exact_candidates.append(
+                candidate
+            )
+        elif str(int(year)) in combined_name:
+            fallback_candidates.append(
+                candidate
+            )
+
+    candidates = (
+        exact_candidates
+        if exact_candidates
+        else fallback_candidates
+    )
 
     if not candidates:
+        sample_names = [
+            clean_text(
+                item.get(
+                    "Document", {}
+                ).get(
+                    "ConstructedName"
+                )
+            )
+            for item in docs[:5]
+        ]
+
         raise ValueError(
-            f"ERCOT historical report {report_type_id} "
-            f"does not currently list a {year} annual file."
+            f"ERCOT historical report {report_type_id} does not "
+            f"currently list a {year} annual file. "
+            f"Sample available files: {sample_names}"
         )
 
     candidates = sorted(
@@ -1723,61 +1863,79 @@ def _ercot_historical_document(report_type_id, year):
     return candidates[0]
 
 
-def _read_ercot_historical_excel_zip(document):
+def _extract_ercot_historical_workbook(document):
+    """Download an annual ERCOT report and return workbook bytes + name."""
     binary = _download_ercot_bytes(
         document[
             "URL"
-        ]
+        ],
+        accept=(
+            "application/zip, application/vnd.openxmlformats-"
+            "officedocument.spreadsheetml.sheet, */*"
+        ),
+        referer=(
+            "https://www.ercot.com/mp/data-products/"
+            "data-product-details"
+        ),
+        timeout=180,
+        retries=3
     )
 
-    with ZipFile(
-        io.BytesIO(binary)
-    ) as archive:
+    # XLSX itself is a ZIP container. First determine whether ERCOT returned
+    # an outer report ZIP containing an Excel file or a direct XLSX payload.
+    try:
+        archive = ZipFile(
+            io.BytesIO(
+                binary
+            )
+        )
+    except Exception as exc:
+        raise ValueError(
+            "ERCOT historical report download was not a valid ZIP/XLSX "
+            f"payload: {clean_text(exc)}"
+        ) from exc
+
+    with archive:
+        names = archive.namelist()
+
         excel_names = [
             name
-            for name in archive.namelist()
+            for name in names
             if name.lower().endswith(
                 (".xlsx", ".xls")
             )
         ]
 
-        if not excel_names:
-            raise ValueError(
-                "ERCOT historical ZIP did not contain an Excel file."
+        if excel_names:
+            workbook_name = excel_names[0]
+            return (
+                archive.read(
+                    workbook_name
+                ),
+                workbook_name
             )
 
-        excel_bytes = archive.read(
-            excel_names[0]
-        )
+        # Direct XLSX payload: its ZIP contains xl/workbook.xml rather than
+        # a nested .xlsx file.
+        if (
+            "[Content_Types].xml" in names
+            and any(
+                name.startswith(
+                    "xl/"
+                )
+                for name in names
+            )
+        ):
+            return (
+                binary,
+                document.get(
+                    "Constructed Name",
+                    "ercot_history.xlsx"
+                )
+            )
 
-    try:
-        sheets = pd.read_excel(
-            io.BytesIO(
-                excel_bytes
-            ),
-            sheet_name=None
-        )
-    except ImportError as exc:
-        raise RuntimeError(
-            "Historical ERCOT Excel files require openpyxl. "
-            "Add openpyxl to requirements.txt for the Streamlit app."
-        ) from exc
-
-    usable = [
-        frame
-        for frame in sheets.values()
-        if isinstance(frame, pd.DataFrame)
-        and not frame.empty
-    ]
-
-    if not usable:
-        raise ValueError(
-            "ERCOT historical workbook contained no usable data."
-        )
-
-    return pd.concat(
-        usable,
-        ignore_index=True
+    raise ValueError(
+        "ERCOT historical ZIP did not contain a usable Excel workbook."
     )
 
 
@@ -1789,243 +1947,707 @@ def _normalize_historical_column_name(value):
     )
 
 
-def _find_historical_column(frame, candidates):
-    normalized = {
-        _normalize_historical_column_name(column): column
-        for column in frame.columns
+def _historical_header_map(values):
+    return {
+        _normalize_historical_column_name(
+            value
+        ): index
+        for index, value in enumerate(
+            values
+        )
+        if clean_text(
+            value
+        )
     }
 
+
+def _historical_index(header_map, candidates):
     for candidate in candidates:
         key = _normalize_historical_column_name(
             candidate
         )
 
-        if key in normalized:
-            return normalized[key]
+        if key in header_map:
+            return header_map[
+                key
+            ]
 
     return None
 
 
-def normalize_ercot_historical_prices(
-    frame,
-    market,
-    year
+def _parse_historical_hour(value):
+    """Parse ERCOT Delivery Hour / Hour Ending values into 1..24."""
+    if value is None:
+        return np.nan
+
+    if isinstance(
+        value,
+        (int, float, np.integer, np.floating)
+    ):
+        if pd.isna(
+            value
+        ):
+            return np.nan
+
+        return int(
+            float(
+                value
+            )
+        )
+
+    # Excel may surface a time cell as datetime.time.
+    hour_attr = getattr(
+        value,
+        "hour",
+        None
+    )
+
+    minute_attr = getattr(
+        value,
+        "minute",
+        None
+    )
+
+    if hour_attr is not None:
+        hour = int(
+            hour_attr
+        )
+        minute = int(
+            minute_attr or 0
+        )
+
+        # An Excel 00:00 cell is typically HE24 in ERCOT annual files.
+        if hour == 0 and minute == 0:
+            return 24
+
+        return hour
+
+    text = clean_text(
+        value
+    )
+
+    if not text:
+        return np.nan
+
+    match = re.match(
+        r"^(\d{1,2})(?::\d{2})?",
+        text
+    )
+
+    if not match:
+        return np.nan
+
+    hour = int(
+        match.group(
+            1
+        )
+    )
+
+    if hour == 0:
+        return 24
+
+    return hour
+
+
+def _parse_historical_interval(value):
+    if value is None or pd.isna(
+        value
+    ):
+        return 1
+
+    try:
+        interval = int(
+            float(
+                value
+            )
+        )
+    except Exception:
+        return 1
+
+    return min(
+        max(
+            interval,
+            1
+        ),
+        4
+    )
+
+
+def _historical_row_timestamp(
+    delivery_date,
+    delivery_hour,
+    delivery_interval,
+    market
 ):
-    data = frame.copy()
-
-    delivery_date_col = _find_historical_column(
-        data,
-        [
-            "Delivery Date",
-            "DeliveryDate",
-            "Oper Day",
-            "OperDay",
-            "Date"
-        ]
+    day = pd.to_datetime(
+        delivery_date,
+        errors="coerce"
     )
 
-    delivery_hour_col = _find_historical_column(
-        data,
-        [
-            "Delivery Hour",
-            "DeliveryHour",
-            "Hour Ending",
-            "HourEnding"
-        ]
+    if pd.isna(
+        day
+    ):
+        return pd.NaT
+
+    hour = _parse_historical_hour(
+        delivery_hour
     )
 
-    delivery_interval_col = _find_historical_column(
-        data,
-        [
-            "Delivery Interval",
-            "DeliveryInterval"
-        ]
+    if pd.isna(
+        hour
+    ):
+        return pd.NaT
+
+    hour = int(
+        hour
     )
 
-    location_col = _find_historical_column(
-        data,
-        [
-            "Settlement Point Name",
-            "SettlementPointName",
-            "Settlement Point",
-            "SettlementPoint",
-            "Location"
-        ]
+    if hour < 1 or hour > 24:
+        return pd.NaT
+
+    timestamp = (
+        day.normalize()
+        + pd.Timedelta(
+            hours=hour - 1
+        )
     )
 
-    price_col = _find_historical_column(
-        data,
-        [
-            "Settlement Point Price",
-            "SettlementPointPrice",
-            "SPP",
-            "Price"
-        ]
-    )
+    if clean_text(
+        market
+    ).upper() == "RT":
+        interval = _parse_historical_interval(
+            delivery_interval
+        )
 
-    required = {
-        "Delivery Date": delivery_date_col,
-        "Delivery Hour": delivery_hour_col,
-        "Settlement Point": location_col,
-        "SPP": price_col
-    }
+        timestamp = (
+            timestamp
+            + pd.Timedelta(
+                minutes=(
+                    interval - 1
+                ) * 15
+            )
+        )
 
-    missing = [
-        label
-        for label, column in required.items()
-        if column is None
-    ]
+    return timestamp
 
-    if missing:
+
+def _read_ercot_historical_point_xlsx(
+    workbook_bytes,
+    market,
+    year,
+    settlement_point,
+    start_timestamp,
+    end_timestamp
+):
+    """Read only one hub/load-zone from the annual XLSX.
+
+    This is the main performance fix. The old code loaded every row for every
+    hub/load zone from every sheet into pandas before filtering to HB_SOUTH
+    (or another selected point). Annual RTM workbooks are large. In Streamlit
+    that approach can exhaust memory or time out. openpyxl read-only mode
+    streams the sheets and keeps only the selected settlement point.
+    """
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise RuntimeError(
+            "Historical ERCOT Excel files require openpyxl. "
+            "Add openpyxl to requirements.txt."
+        ) from exc
+
+    try:
+        workbook = load_workbook(
+            io.BytesIO(
+                workbook_bytes
+            ),
+            read_only=True,
+            data_only=True
+        )
+    except Exception as exc:
         raise ValueError(
-            "Historical ERCOT workbook is missing expected fields: "
-            + ", ".join(missing)
+            "ERCOT historical XLSX could not be opened: "
+            f"{clean_text(exc)}"
+        ) from exc
+
+    target_point = clean_text(
+        settlement_point
+    ).upper()
+
+    market = clean_text(
+        market
+    ).upper()
+
+    rows = []
+    sheets_read = 0
+    headers_found = 0
+
+    try:
+        for worksheet in workbook.worksheets:
+            sheets_read += 1
+            row_iter = worksheet.iter_rows(
+                values_only=True
+            )
+
+            header_values = None
+            header_map = None
+
+            # Normally the header is row 1. Scan the first 12 non-empty rows
+            # to remain tolerant of workbook title/blank rows.
+            for _ in range(12):
+                try:
+                    candidate = next(
+                        row_iter
+                    )
+                except StopIteration:
+                    break
+
+                if candidate is None:
+                    continue
+
+                candidate_map = _historical_header_map(
+                    candidate
+                )
+
+                location_idx = _historical_index(
+                    candidate_map,
+                    [
+                        "Settlement Point Name",
+                        "Settlement Point",
+                        "SettlementPointName",
+                        "SettlementPoint"
+                    ]
+                )
+
+                price_idx = _historical_index(
+                    candidate_map,
+                    [
+                        "Settlement Point Price",
+                        "SettlementPointPrice",
+                        "SPP"
+                    ]
+                )
+
+                date_idx = _historical_index(
+                    candidate_map,
+                    [
+                        "Delivery Date",
+                        "DeliveryDate"
+                    ]
+                )
+
+                hour_idx = _historical_index(
+                    candidate_map,
+                    [
+                        "Delivery Hour",
+                        "Hour Ending",
+                        "DeliveryHour",
+                        "HourEnding"
+                    ]
+                )
+
+                if None not in (
+                    location_idx,
+                    price_idx,
+                    date_idx,
+                    hour_idx
+                ):
+                    header_values = candidate
+                    header_map = candidate_map
+                    break
+
+            if header_map is None:
+                continue
+
+            headers_found += 1
+
+            location_idx = _historical_index(
+                header_map,
+                [
+                    "Settlement Point Name",
+                    "Settlement Point",
+                    "SettlementPointName",
+                    "SettlementPoint"
+                ]
+            )
+
+            price_idx = _historical_index(
+                header_map,
+                [
+                    "Settlement Point Price",
+                    "SettlementPointPrice",
+                    "SPP"
+                ]
+            )
+
+            date_idx = _historical_index(
+                header_map,
+                [
+                    "Delivery Date",
+                    "DeliveryDate"
+                ]
+            )
+
+            hour_idx = _historical_index(
+                header_map,
+                [
+                    "Delivery Hour",
+                    "Hour Ending",
+                    "DeliveryHour",
+                    "HourEnding"
+                ]
+            )
+
+            interval_idx = _historical_index(
+                header_map,
+                [
+                    "Delivery Interval",
+                    "DeliveryInterval"
+                ]
+            )
+
+            for values in row_iter:
+                if values is None:
+                    continue
+
+                max_needed_index = max(
+                    index
+                    for index in [
+                        location_idx,
+                        price_idx,
+                        date_idx,
+                        hour_idx
+                    ]
+                    if index is not None
+                )
+
+                if len(
+                    values
+                ) <= max_needed_index:
+                    continue
+
+                point_value = clean_text(
+                    values[
+                        location_idx
+                    ]
+                ).upper()
+
+                if point_value != target_point:
+                    continue
+
+                delivery_interval = (
+                    values[
+                        interval_idx
+                    ]
+                    if (
+                        interval_idx is not None
+                        and len(values) > interval_idx
+                    )
+                    else 1
+                )
+
+                timestamp = _historical_row_timestamp(
+                    values[
+                        date_idx
+                    ],
+                    values[
+                        hour_idx
+                    ],
+                    delivery_interval,
+                    market
+                )
+
+                if pd.isna(
+                    timestamp
+                ):
+                    continue
+
+                if (
+                    timestamp < start_timestamp
+                    or timestamp > end_timestamp
+                ):
+                    continue
+
+                price = pd.to_numeric(
+                    values[
+                        price_idx
+                    ],
+                    errors="coerce"
+                )
+
+                if pd.isna(
+                    price
+                ):
+                    continue
+
+                rows.append(
+                    {
+                        "Timestamp": timestamp,
+                        "Delivery Date": timestamp.normalize(),
+                        "Delivery Hour": _parse_historical_hour(
+                            values[
+                                hour_idx
+                            ]
+                        ),
+                        "Delivery Interval": (
+                            _parse_historical_interval(
+                                delivery_interval
+                            )
+                            if market == "RT"
+                            else np.nan
+                        ),
+                        "Settlement Point": target_point,
+                        "Market": market,
+                        "SPP": float(
+                            price
+                        ),
+                        "Source Year": int(
+                            year
+                        )
+                    }
+                )
+
+    finally:
+        workbook.close()
+
+    if headers_found == 0:
+        raise ValueError(
+            f"ERCOT historical {market} workbook for {year} did not "
+            "contain the expected price-table headers."
+        )
+
+    if not rows:
+        raise ValueError(
+            f"ERCOT historical {market} workbook for {year} contained "
+            f"no {target_point} rows inside the selected date window."
         )
 
     result = pd.DataFrame(
-        {
-            "Delivery Date": pd.to_datetime(
-                data[
-                    delivery_date_col
-                ],
-                errors="coerce"
-            ),
-            "Delivery Hour": pd.to_numeric(
-                data[
-                    delivery_hour_col
-                ],
-                errors="coerce"
-            ),
-            "Settlement Point": (
-                data[
-                    location_col
-                ]
-                .astype(str)
-                .str.strip()
-                .str.upper()
-            ),
-            "SPP": pd.to_numeric(
-                data[
-                    price_col
-                ],
-                errors="coerce"
-            )
-        }
+        rows
     )
 
-    if delivery_interval_col is not None:
-        result[
-            "Delivery Interval"
-        ] = pd.to_numeric(
-            data[
-                delivery_interval_col
-            ],
-            errors="coerce"
-        )
-    else:
-        result[
-            "Delivery Interval"
-        ] = np.nan
-
-    result = result[
-        result[
-            "Delivery Date"
-        ].notna()
-        &
-        result[
-            "Delivery Hour"
-        ].notna()
-        &
-        result[
-            "Settlement Point"
-        ].str.startswith(
-            ("HB_", "LZ_")
-        )
-        &
-        result[
-            "SPP"
-        ].notna()
-    ].copy()
-
-    if result.empty:
-        raise ValueError(
-            f"ERCOT historical {market} workbook for {year} "
-            "contained no usable hub/load-zone rows."
-        )
-
-    # Build a naive Central-clock timestamp for charting. The
-    # delivery date remains separately available for daily grouping,
-    # which avoids DST edge cases affecting daily price statistics.
-    hour_beginning = (
-        result[
-            "Delivery Hour"
-        ]
-        - 1
-    ).clip(
-        lower=0
-    )
-
-    result[
+    return result.sort_values(
         "Timestamp"
-    ] = (
-        result[
-            "Delivery Date"
-        ]
-        + pd.to_timedelta(
-            hour_beginning,
-            unit="h"
-        )
+    ).reset_index(
+        drop=True
     )
 
-    if market == "RT":
-        interval_number = result[
-            "Delivery Interval"
-        ].fillna(
-            1
+
+def _read_ercot_historical_point_legacy_excel(
+    workbook_bytes,
+    workbook_name,
+    market,
+    year,
+    settlement_point,
+    start_timestamp,
+    end_timestamp
+):
+    """Fallback for legacy .xls annual files; recent 2Y files are XLSX."""
+    try:
+        sheets = pd.read_excel(
+            io.BytesIO(
+                workbook_bytes
+            ),
+            sheet_name=None
         )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not read legacy ERCOT workbook {workbook_name}: "
+            f"{clean_text(exc)}"
+        ) from exc
 
-        result[
-            "Timestamp"
-        ] = (
-            result[
-                "Timestamp"
-            ]
-            + pd.to_timedelta(
-                (
-                    interval_number
-                    - 1
-                )
-                * 15,
-                unit="m"
-            )
-        )
+    frames = []
 
-    result[
-        "Market"
-    ] = market
+    for raw in sheets.values():
+        if raw.empty:
+            continue
 
-    result[
-        "Source Year"
-    ] = int(
-        year
-    )
+        normalized_columns = {
+            _normalize_historical_column_name(
+                column
+            ): column
+            for column in raw.columns
+        }
 
-    return result[
-        [
-            "Timestamp",
-            "Delivery Date",
-            "Delivery Hour",
-            "Delivery Interval",
-            "Settlement Point",
-            "Market",
-            "SPP",
-            "Source Year"
-        ]
-    ].sort_values(
-        [
-            "Timestamp",
+        location_col = None
+        price_col = None
+        date_col = None
+        hour_col = None
+        interval_col = None
+
+        for candidate in [
+            "Settlement Point Name",
             "Settlement Point"
-        ]
+        ]:
+            key = _normalize_historical_column_name(
+                candidate
+            )
+            if key in normalized_columns:
+                location_col = normalized_columns[
+                    key
+                ]
+                break
+
+        for candidate in [
+            "Settlement Point Price",
+            "SPP"
+        ]:
+            key = _normalize_historical_column_name(
+                candidate
+            )
+            if key in normalized_columns:
+                price_col = normalized_columns[
+                    key
+                ]
+                break
+
+        for candidate in [
+            "Delivery Date"
+        ]:
+            key = _normalize_historical_column_name(
+                candidate
+            )
+            if key in normalized_columns:
+                date_col = normalized_columns[
+                    key
+                ]
+                break
+
+        for candidate in [
+            "Delivery Hour",
+            "Hour Ending"
+        ]:
+            key = _normalize_historical_column_name(
+                candidate
+            )
+            if key in normalized_columns:
+                hour_col = normalized_columns[
+                    key
+                ]
+                break
+
+        interval_key = _normalize_historical_column_name(
+            "Delivery Interval"
+        )
+        if interval_key in normalized_columns:
+            interval_col = normalized_columns[
+                interval_key
+            ]
+
+        if None in (
+            location_col,
+            price_col,
+            date_col,
+            hour_col
+        ):
+            continue
+
+        subset = raw[
+            raw[
+                location_col
+            ].astype(str).str.strip().str.upper()
+            == clean_text(
+                settlement_point
+            ).upper()
+        ].copy()
+
+        if subset.empty:
+            continue
+
+        subset[
+            "Timestamp"
+        ] = subset.apply(
+            lambda row: _historical_row_timestamp(
+                row[
+                    date_col
+                ],
+                row[
+                    hour_col
+                ],
+                (
+                    row[
+                        interval_col
+                    ]
+                    if interval_col is not None
+                    else 1
+                ),
+                market
+            ),
+            axis=1
+        )
+
+        subset = subset[
+            subset[
+                "Timestamp"
+            ].between(
+                start_timestamp,
+                end_timestamp,
+                inclusive="both"
+            )
+        ].copy()
+
+        if subset.empty:
+            continue
+
+        out = pd.DataFrame(
+            {
+                "Timestamp": subset[
+                    "Timestamp"
+                ],
+                "Delivery Date": subset[
+                    "Timestamp"
+                ].dt.normalize(),
+                "Delivery Hour": subset[
+                    hour_col
+                ].apply(
+                    _parse_historical_hour
+                ),
+                "Delivery Interval": (
+                    subset[
+                        interval_col
+                    ].apply(
+                        _parse_historical_interval
+                    )
+                    if (
+                        market == "RT"
+                        and interval_col is not None
+                    )
+                    else np.nan
+                ),
+                "Settlement Point": clean_text(
+                    settlement_point
+                ).upper(),
+                "Market": market,
+                "SPP": pd.to_numeric(
+                    subset[
+                        price_col
+                    ],
+                    errors="coerce"
+                ),
+                "Source Year": int(
+                    year
+                )
+            }
+        )
+
+        frames.append(
+            out[
+                out[
+                    "SPP"
+                ].notna()
+            ]
+        )
+
+    if not frames:
+        raise ValueError(
+            f"ERCOT historical {market} workbook for {year} contained "
+            f"no usable {settlement_point} rows."
+        )
+
+    return pd.concat(
+        frames,
+        ignore_index=True
+    ).sort_values(
+        "Timestamp"
     ).reset_index(
         drop=True
     )
@@ -2033,12 +2655,21 @@ def normalize_ercot_historical_prices(
 
 @st.cache_data(
     ttl=6 * 60 * 60,
-    show_spinner=False
+    show_spinner=False,
+    max_entries=24
 )
-def fetch_ercot_historical_year(
+def fetch_ercot_historical_point_year(
     market,
-    year
+    year,
+    settlement_point,
+    start_iso,
+    end_iso
 ):
+    """Load one point for one annual ERCOT historical report.
+
+    Caching is point-specific, so changing dashboard filters does not cache a
+    multi-hundred-MB all-node DataFrame.
+    """
     market = clean_text(
         market
     ).upper()
@@ -2056,20 +2687,48 @@ def fetch_ercot_historical_year(
             "Historical market must be RT or DAM."
         )
 
+    start_timestamp = pd.Timestamp(
+        start_iso
+    )
+
+    end_timestamp = pd.Timestamp(
+        end_iso
+    )
+
     document = _ercot_historical_document(
         report_type_id,
         int(year)
     )
 
-    raw = _read_ercot_historical_excel_zip(
-        document
+    workbook_bytes, workbook_name = (
+        _extract_ercot_historical_workbook(
+            document
+        )
     )
 
-    normalized = normalize_ercot_historical_prices(
-        raw,
-        market=market,
-        year=int(year)
-    )
+    if workbook_name.lower().endswith(
+        ".xls"
+    ) and not workbook_name.lower().endswith(
+        ".xlsx"
+    ):
+        normalized = _read_ercot_historical_point_legacy_excel(
+            workbook_bytes,
+            workbook_name,
+            market,
+            int(year),
+            settlement_point,
+            start_timestamp,
+            end_timestamp
+        )
+    else:
+        normalized = _read_ercot_historical_point_xlsx(
+            workbook_bytes,
+            market,
+            int(year),
+            settlement_point,
+            start_timestamp,
+            end_timestamp
+        )
 
     return normalized, document
 
@@ -2097,7 +2756,8 @@ def historical_window_start(label, now_central):
 
 def load_ercot_historical_window(
     market,
-    window_label
+    window_label,
+    settlement_point
 ):
     now_central = pd.Timestamp.now(
         tz="America/Chicago"
@@ -2122,10 +2782,34 @@ def load_ercot_historical_window(
     errors = []
 
     for year in years:
+        year_start = max(
+            start,
+            pd.Timestamp(
+                year=year,
+                month=1,
+                day=1
+            )
+        )
+
+        year_end = min(
+            now_central,
+            pd.Timestamp(
+                year=year,
+                month=12,
+                day=31,
+                hour=23,
+                minute=59,
+                second=59
+            )
+        )
+
         try:
-            frame, document = fetch_ercot_historical_year(
+            frame, document = fetch_ercot_historical_point_year(
                 market,
-                year
+                year,
+                settlement_point,
+                year_start.isoformat(),
+                year_end.isoformat()
             )
 
             frames.append(
@@ -2156,21 +2840,21 @@ def load_ercot_historical_window(
     )
 
     combined = combined[
-        (
-            combined[
-                "Timestamp"
-            ] >= start
-        )
-        &
-        (
-            combined[
-                "Timestamp"
-            ] <= now_central
+        combined[
+            "Timestamp"
+        ].between(
+            start,
+            now_central,
+            inclusive="both"
         )
     ].copy()
 
     return (
-        combined,
+        combined.sort_values(
+            "Timestamp"
+        ).reset_index(
+            drop=True
+        ),
         documents,
         errors,
         start,
@@ -2342,6 +3026,7 @@ with price_tab:
         fetch_ercot_rt_spp.clear()
         fetch_ercot_dam_spp.clear()
         fetch_ercot_dam_mcpc.clear()
+        fetch_ercot_historical_point_year.clear()
         st.rerun()
 
     with source_col:
@@ -3272,7 +3957,8 @@ with price_tab:
                 historical_end
             ) = load_ercot_historical_window(
                 historical_market_code,
-                historical_window
+                historical_window,
+                historical_point
             )
 
             historical_documents.extend(
