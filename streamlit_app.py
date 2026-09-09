@@ -2427,297 +2427,327 @@ with dashboard_tab:
         "## 📘 Dashboard Guide"
     )
 
-    guide_left, guide_right = st.columns(
-        [1.55, 1]
+    st.caption(
+        "The Opportunity Score ranks ERCOT acquisition targets based on "
+        "seller motivation, project maturity, market attractiveness, "
+        "acquisition value and transaction executability."
     )
 
 
-    with guide_left:
+    # ========================================================
+    # 1. OPPORTUNITY SCORE — EXECUTIVE VIEW
+    # ========================================================
+    st.markdown(
+        "### 🎯 1. Opportunity Score"
+    )
+
+    st.caption(
+        "Projects are scored from 0–100 to prioritize attractive and "
+        "actionable acquisition opportunities. The score is a sourcing "
+        "and prioritization screen — not an investment decision."
+    )
+
+
+    scoring_methodology = pd.DataFrame(
+        {
+            "Factor": [
+                "Seller Motivation",
+                "Development Stage",
+                "Market / Revenue",
+                "Acquisition Value",
+                "Executability",
+            ],
+
+            "Weight": [
+                f"{distress_weight:.0%}",
+                f"{development_weight:.0%}",
+                f"{market_weight:.0%}",
+                f"{value_weight:.0%}",
+                f"{exec_weight:.0%}",
+            ],
+
+            "What It Measures": [
+                "Why the owner may be motivated to transact",
+                "Project maturity and progress through development",
+                "Revenue visibility + ERCOT location",
+                "Tax-credit / siting attributes",
+                "Whether the opportunity can realistically become a transaction",
+            ],
+        }
+    )
+
+
+    st.dataframe(
+        scoring_methodology,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    st.markdown(
+        "#### Weighted Formula"
+    )
+
+
+    st.markdown(
+        f"**Opportunity Score = "
+        f"Seller Motivation × {distress_weight:.0%} + "
+        f"Development Stage × {development_weight:.0%} + "
+        f"Market / Revenue × {market_weight:.0%} + "
+        f"Acquisition Value × {value_weight:.0%} + "
+        f"Executability × {exec_weight:.0%}**"
+    )
+
+
+    # ========================================================
+    # 2. WORKED EXAMPLE — IMMEDIATELY AFTER FORMULA
+    # ========================================================
+    example_seller = (
+        distress_4
+        * confidence_high
+    )
+
+    example_development = (
+        development_operating
+    )
+
+    example_revenue = (
+        market_both
+    )
+
+    example_location = (
+        location_north
+    )
+
+    example_market = (
+        example_revenue
+        * revenue_visibility_weight
+
+        +
+
+        example_location
+        * location_market_weight
+    )
+
+    example_value = (
+        value_tax
+    )
+
+    example_actionability = 100
+
+    example_timing = (
+        timing_operating
+    )
+
+    example_executability = (
+        example_actionability
+        * actionability_weight
+
+        +
+
+        example_timing
+        * timing_exec_weight
+
+        +
+
+        example_development
+        * development_exec_weight
+    )
+
+    example_final = (
+        example_seller
+        * distress_weight
+
+        +
+
+        example_development
+        * development_weight
+
+        +
+
+        example_market
+        * market_weight
+
+        +
+
+        example_value
+        * value_weight
+
+        +
+
+        example_executability
+        * exec_weight
+    )
+
+    example_seller_contribution = (
+        example_seller
+        * distress_weight
+    )
+
+    example_development_contribution = (
+        example_development
+        * development_weight
+    )
+
+    example_market_contribution = (
+        example_market
+        * market_weight
+    )
+
+    example_value_contribution = (
+        example_value
+        * value_weight
+    )
+
+    example_executability_contribution = (
+        example_executability
+        * exec_weight
+    )
+
+
+    st.markdown(
+        "### 🧮 2. Worked Example"
+    )
+
+    st.caption(
+        "This example shows exactly how the factor scores roll into the "
+        "final Opportunity Score. All values update dynamically with the "
+        "sidebar scoring assumptions."
+    )
+
+
+    st.success(
+        f"**Example Opportunity Score: {example_final:.1f}**\n\n"
+        f"**{example_final:.1f} = "
+        f"({example_seller:.1f} × {distress_weight:.0%}) + "
+        f"({example_development:.1f} × {development_weight:.0%}) + "
+        f"({example_market:.1f} × {market_weight:.0%}) + "
+        f"({example_value:.1f} × {value_weight:.0%}) + "
+        f"({example_executability:.1f} × {exec_weight:.0%})**\n\n"
+        f"**{example_final:.1f} = "
+        f"{example_seller_contribution:.1f} + "
+        f"{example_development_contribution:.1f} + "
+        f"{example_market_contribution:.1f} + "
+        f"{example_value_contribution:.1f} + "
+        f"{example_executability_contribution:.1f}**"
+    )
+
+
+    example_background = pd.DataFrame(
+        {
+            "Factor": [
+                "Seller Motivation",
+                "Development Stage",
+                "Market / Revenue",
+                "Acquisition Value",
+                "Executability",
+            ],
+
+            "Score": [
+                example_seller,
+                example_development,
+                example_market,
+                example_value,
+                example_executability,
+            ],
+
+            "Weight": [
+                f"{distress_weight:.0%}",
+                f"{development_weight:.0%}",
+                f"{market_weight:.0%}",
+                f"{value_weight:.0%}",
+                f"{exec_weight:.0%}",
+            ],
+
+            "Weighted Points": [
+                example_seller_contribution,
+                example_development_contribution,
+                example_market_contribution,
+                example_value_contribution,
+                example_executability_contribution,
+            ],
+
+            "Why": [
+                (
+                    "Discount Potential 4 = 80; "
+                    "High Confidence = 100%; "
+                    "80 × 100% = 80"
+                ),
+
+                "Operating project = 100",
+
+                (
+                    f"Revenue Visibility {example_revenue:.0f} × "
+                    f"{revenue_visibility_weight:.0%} + "
+                    f"ERCOT-N {example_location:.0f} × "
+                    f"{location_market_weight:.0%} = "
+                    f"{example_market:.1f}"
+                ),
+
+                "Tax Credit only = 70",
+
+                (
+                    f"Seller Actionability {example_actionability:.0f} × "
+                    f"{actionability_weight:.0%} + "
+                    f"Timing {example_timing:.0f} × "
+                    f"{timing_exec_weight:.0%} + "
+                    f"Development Stage {example_development:.0f} × "
+                    f"{development_exec_weight:.0%} = "
+                    f"{example_executability:.1f}"
+                ),
+            ],
+        }
+    )
+
+
+    st.dataframe(
+        example_background,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Score":
+                st.column_config.NumberColumn(
+                    "Score",
+                    format="%.1f"
+                ),
+            "Weighted Points":
+                st.column_config.NumberColumn(
+                    "Weighted Points",
+                    format="%.1f"
+                ),
+        }
+    )
+
+
+    # ========================================================
+    # 3. HOW TO USE + SCORE GUIDE
+    # ========================================================
+    st.markdown(
+        "### 🧭 3. How to Use the Dashboard"
+    )
+
+    use_left, use_right = st.columns(
+        [1.25, 1]
+    )
+
+
+    with use_left:
 
         st.markdown(
-            "### 🎯 Opportunity Score"
-        )
-
-        st.caption(
-            "Projects are scored from 0–100 to prioritize "
-            "attractive and actionable acquisition opportunities."
-        )
-
-
-        scoring_methodology = pd.DataFrame(
-            {
-                "Factor": [
-                    "Seller Motivation",
-                    "Development Stage",
-                    "Market / Revenue",
-                    "Acquisition Value",
-                    "Executability",
-                ],
-
-                "Weight": [
-                    f"{distress_weight:.0%}",
-                    f"{development_weight:.0%}",
-                    f"{market_weight:.0%}",
-                    f"{value_weight:.0%}",
-                    f"{exec_weight:.0%}",
-                ],
-
-                "What It Measures": [
-                    "Likelihood owner is motivated to transact",
-                    "Project maturity and progress through development",
-                    "Revenue visibility + ERCOT location",
-                    "Tax-credit / siting attributes",
-                    "Ability to realistically execute a transaction",
-                ],
-            }
-        )
-
-
-        st.dataframe(
-            scoring_methodology,
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-        st.markdown(
-            "#### Formula"
-        )
-
-
-        st.markdown(
-            f"""
-            **Opportunity Score =
-            Seller Motivation × {distress_weight:.0%}
-            + Development Stage × {development_weight:.0%}
-            + Market / Revenue × {market_weight:.0%}
-            + Acquisition Value × {value_weight:.0%}
-            + Executability × {exec_weight:.0%}**
+            """
+            **1. Screen** — Start with the Management Shortlist and Top Acquisition Targets.  
+            **2. Understand** — Drill into the score breakdown for an individual project.  
+            **3. Compare** — Filter by technology, owner and ERCOT area; review bundle opportunities.  
+            **4. Investigate** — Use the Map Explorer and ERCOT Market Prices for deeper diligence and market context.
             """
         )
 
 
-        st.caption(
-            f"Market / Revenue = Revenue Visibility × "
-            f"{revenue_visibility_weight:.0%} + ERCOT Location × "
-            f"{location_market_weight:.0%}."
-        )
-
-
-        st.caption(
-            f"Executability = Seller Actionability × "
-            f"{actionability_weight:.0%} + Timing × "
-            f"{timing_exec_weight:.0%} + Development Stage × "
-            f"{development_exec_weight:.0%}."
-        )
-
-
-        example_seller = (
-            distress_4
-            * confidence_high
-        )
-
-        example_development = (
-            development_operating
-        )
-
-        example_revenue = (
-            market_both
-        )
-
-        example_location = (
-            location_north
-        )
-
-        example_market = (
-            example_revenue
-            * revenue_visibility_weight
-
-            +
-
-            example_location
-            * location_market_weight
-        )
-
-        example_value = (
-            value_tax
-        )
-
-        example_actionability = 100
-
-        example_timing = (
-            timing_operating
-        )
-
-        example_executability = (
-            example_actionability
-            * actionability_weight
-
-            +
-
-            example_timing
-            * timing_exec_weight
-
-            +
-
-            example_development
-            * development_exec_weight
-        )
-
-        example_final = (
-            example_seller
-            * distress_weight
-
-            +
-
-            example_development
-            * development_weight
-
-            +
-
-            example_market
-            * market_weight
-
-            +
-
-            example_value
-            * value_weight
-
-            +
-
-            example_executability
-            * exec_weight
-        )
-
+    with use_right:
 
         st.markdown(
-            "#### Example"
+            "#### 🚦 Score Guide"
         )
-
-
-        example_background = pd.DataFrame(
-            {
-                "Factor": [
-                    "Seller Motivation",
-                    "Development Stage",
-                    "Market / Revenue",
-                    "Acquisition Value",
-                    "Executability",
-                ],
-
-                "Score": [
-                    example_seller,
-                    example_development,
-                    example_market,
-                    example_value,
-                    example_executability,
-                ],
-
-                "Why": [
-                    (
-                        "Discount Potential 4 = 80; "
-                        "High Confidence = 100%; "
-                        "80 × 100% = 80"
-                    ),
-
-                    "Operating project = 100",
-
-                    (
-                        f"Revenue visibility = "
-                        f"{example_revenue:.0f}; "
-                        f"ERCOT-N = "
-                        f"{example_location:.0f}"
-                    ),
-
-                    "Tax Credit only = 70",
-
-                    (
-                        f"Actionability 100 × "
-                        f"{actionability_weight:.0%} + "
-                        f"Timing 100 × "
-                        f"{timing_exec_weight:.0%} + "
-                        f"Development Stage 100 × "
-                        f"{development_exec_weight:.0%}"
-                    ),
-                ],
-            }
-        )
-
-
-        st.dataframe(
-            example_background,
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-        example_seller_contribution = (
-            example_seller
-            * distress_weight
-        )
-
-        example_development_contribution = (
-            example_development
-            * development_weight
-        )
-
-        example_market_contribution = (
-            example_market
-            * market_weight
-        )
-
-        example_value_contribution = (
-            example_value
-            * value_weight
-        )
-
-        example_executability_contribution = (
-            example_executability
-            * exec_weight
-        )
-
-
-        st.success(
-            f"**{example_final:.1f} = "
-            f"({example_seller:.1f} × {distress_weight:.0%}) "
-            f"+ ({example_development:.1f} × {development_weight:.0%}) "
-            f"+ ({example_market:.1f} × {market_weight:.0%}) "
-            f"+ ({example_value:.1f} × {value_weight:.0%}) "
-            f"+ ({example_executability:.1f} × {exec_weight:.0%})**\n\n"
-            f"= {example_seller_contribution:.1f} "
-            f"+ {example_development_contribution:.1f} "
-            f"+ {example_market_contribution:.1f} "
-            f"+ {example_value_contribution:.1f} "
-            f"+ {example_executability_contribution:.1f} "
-            f"= **{example_final:.1f}**"
-        )
-
-
-    with guide_right:
-
-        st.markdown(
-            "### 🧭 How to Use"
-        )
-
-
-        st.markdown(
-            """
-            **1. Management Shortlist** — Top 5 priorities  
-            **2. Top Acquisition Targets** — Top 20 overall  
-            **3. By Technology** — Solar, Storage or Wind  
-            **4. ERCOT Area** — Compare market location  
-            **5. Bundles** — Multiple 50–60 MW assets by owner  
-            **6. Score Breakdown** — Drill into a project  
-            **7. Map Explorer** — View all mapped projects, filter the universe, and drill into a selected project  
-            **8. ERCOT Market Prices** — Monitor live RT SPP, DAM prices, ancillary-service clearing prices, and project-area benchmarks
-            """
-        )
-
-
-        st.markdown(
-            "### 🚦 Score Guide"
-        )
-
 
         st.markdown(
             """
@@ -2729,119 +2759,148 @@ with dashboard_tab:
         )
 
 
-        st.markdown(
-            "### 🗺️ Location Logic"
+    st.markdown(
+        "#### Key Definitions"
+    )
+
+    definition_left, definition_right = st.columns(
+        2
+    )
+
+
+    with definition_left:
+
+        st.info(
+            "**Seller Motivation — Why would they sell?**\n\n"
+            "Measures the strength of the economic or strategic reason "
+            "the owner may be willing to transact. It is driven by "
+            "Discount Potential and adjusted for Confidence."
         )
 
 
-        location_guide = pd.DataFrame(
-            {
-                "Area": [
-                    "ERCOT-N",
-                    "ERCOT-H",
-                    "ERCOT-S",
-                    "ERCOT-W",
-                    "Panhandle",
-                ],
+    with definition_right:
 
-                "Score": [
-                    location_north,
-                    location_houston,
-                    location_south,
-                    location_west,
-                    location_panhandle,
-                ],
-            }
+        st.info(
+            "**Executability — Can we actually turn it into a deal?**\n\n"
+            "Measures whether the opportunity can realistically progress "
+            "toward a transaction based on Seller Actionability, timing / "
+            "COD and Development Stage."
         )
 
 
-        st.dataframe(
-            location_guide,
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-        st.caption(
-            "Location is a broad screening proxy. "
-            "Node-level congestion, basis, curtailment and market "
-            "fundamentals can materially differ within each area."
-        )
+    st.caption(
+        "Data Completeness is not part of the weighted Opportunity Score. "
+        "It is used as a ranking tie-breaker after Opportunity Score, "
+        "followed by project capacity."
+    )
 
 
     # ========================================================
-    # FULL SCORE LOGIC
+    # 4. DETAILED SCORING METHODOLOGY
     # ========================================================
+    st.markdown(
+        "### 📐 4. Detailed Scoring Methodology"
+    )
+
+    st.caption(
+        "Open a section below for the underlying scoring rules. These "
+        "details are intentionally kept below the executive summary so "
+        "the top of the page stays focused on how the ranking works."
+    )
+
+
+    # --------------------------------------------------------
+    # SELLER MOTIVATION
+    # --------------------------------------------------------
     with st.expander(
-        "📐 View Full Score Logic",
+        "Seller Motivation — Discount Potential × Confidence",
         expanded=False
     ):
 
-        st.markdown(
-            "#### Seller Motivation"
+        st.caption(
+            "Seller Motivation asks: why might this owner be willing to "
+            "transact? Discount Potential is a 1–5 qualitative assumption; "
+            "it is not an expected percentage purchase-price discount."
         )
+
+        st.markdown(
+            f"**Seller Motivation Score = Base Discount Score × "
+            f"Confidence Multiplier**"
+        )
+
+        seller_col_1, seller_col_2 = st.columns(
+            2
+        )
+
+        with seller_col_1:
+
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Discount Potential": [
+                            "5 – Very High",
+                            "4 – High",
+                            "3 – Moderate",
+                            "2 – Low",
+                            "1 – Very Low",
+                            "No Signal",
+                        ],
+
+                        "Base Score": [
+                            distress_5,
+                            distress_4,
+                            distress_3,
+                            distress_2,
+                            distress_1,
+                            distress_none,
+                        ],
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        with seller_col_2:
+
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Confidence": [
+                            "High",
+                            "Medium",
+                            "Low"
+                        ],
+
+                        "Multiplier": [
+                            f"{confidence_high:.0%}",
+                            f"{confidence_medium:.0%}",
+                            f"{confidence_low:.0%}",
+                        ],
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
 
         st.caption(
-            "Measures the strength of the seller-side reason "
-            "to transact. The base motivation score is adjusted "
-            "for confidence."
+            f"Seller Motivation contributes {distress_weight:.0%} of the "
+            "overall Opportunity Score."
         )
 
 
-        st.dataframe(
-            pd.DataFrame(
-                {
-                    "Discount Potential": [
-                        "5 – Very High",
-                        "4 – High",
-                        "3 – Moderate",
-                        "2 – Low",
-                        "1 – Very Low",
-                        "No Signal",
-                    ],
+    # --------------------------------------------------------
+    # DEVELOPMENT STAGE
+    # --------------------------------------------------------
+    with st.expander(
+        "Development Stage — Project Maturity",
+        expanded=False
+    ):
 
-                    "Base Score": [
-                        distress_5,
-                        distress_4,
-                        distress_3,
-                        distress_2,
-                        distress_1,
-                        distress_none,
-                    ],
-                }
-            ),
-
-            use_container_width=True,
-            hide_index=True
+        st.caption(
+            "Development Stage rewards projects that are further advanced "
+            "and therefore generally require less remaining development "
+            "work before operations."
         )
-
-
-        st.dataframe(
-            pd.DataFrame(
-                {
-                    "Confidence": [
-                        "High",
-                        "Medium",
-                        "Low"
-                    ],
-
-                    "Multiplier": [
-                        f"{confidence_high:.0%}",
-                        f"{confidence_medium:.0%}",
-                        f"{confidence_low:.0%}",
-                    ],
-                }
-            ),
-
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-        st.markdown(
-            "#### Development Stage"
-        )
-
 
         st.dataframe(
             pd.DataFrame(
@@ -2871,80 +2930,116 @@ with dashboard_tab:
                     ],
                 }
             ),
-
             use_container_width=True,
             hide_index=True
         )
-
-
-        st.markdown(
-            "#### Market / Revenue"
-        )
-
 
         st.caption(
-            f"Market / Revenue = Revenue Visibility × "
-            f"{revenue_visibility_weight:.0%} + ERCOT Location × "
-            f"{location_market_weight:.0%}."
+            f"Development Stage contributes {development_weight:.0%} "
+            "directly to the Opportunity Score and also represents "
+            f"{development_exec_weight:.0%} of Executability."
         )
 
 
-        st.dataframe(
-            pd.DataFrame(
-                {
-                    "Revenue Visibility": [
-                        "Contract + Named Offtaker",
-                        "Named Offtaker Only",
-                        "Contract Only",
-                        "Neither",
-                    ],
-
-                    "Score": [
-                        market_both,
-                        market_offtaker,
-                        market_contract,
-                        market_none,
-                    ],
-                }
-            ),
-
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-        st.dataframe(
-            pd.DataFrame(
-                {
-                    "ERCOT Area": [
-                        "ERCOT-N",
-                        "ERCOT-H",
-                        "ERCOT-S",
-                        "ERCOT-W",
-                        "Panhandle",
-                        "Unknown / Other",
-                    ],
-
-                    "Location Score": [
-                        location_north,
-                        location_houston,
-                        location_south,
-                        location_west,
-                        location_panhandle,
-                        location_unknown,
-                    ],
-                }
-            ),
-
-            use_container_width=True,
-            hide_index=True
-        )
-
+    # --------------------------------------------------------
+    # MARKET / REVENUE + LOCATION
+    # --------------------------------------------------------
+    with st.expander(
+        "Market / Revenue — Revenue Visibility + ERCOT Location",
+        expanded=False
+    ):
 
         st.markdown(
-            "#### Acquisition Value"
+            f"**Market / Revenue = Revenue Visibility × "
+            f"{revenue_visibility_weight:.0%} + ERCOT Location × "
+            f"{location_market_weight:.0%}**"
         )
 
+        market_col_1, market_col_2 = st.columns(
+            2
+        )
+
+        with market_col_1:
+
+            st.markdown(
+                "##### Revenue Visibility"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Revenue Visibility": [
+                            "Contract + Named Offtaker",
+                            "Named Offtaker Only",
+                            "Contract Only",
+                            "Neither",
+                        ],
+
+                        "Score": [
+                            market_both,
+                            market_offtaker,
+                            market_contract,
+                            market_none,
+                        ],
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        with market_col_2:
+
+            st.markdown(
+                "##### ERCOT Location Logic"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "ERCOT Area": [
+                            "ERCOT-N",
+                            "ERCOT-H",
+                            "ERCOT-S",
+                            "ERCOT-W",
+                            "Panhandle",
+                            "Unknown / Other",
+                        ],
+
+                        "Location Score": [
+                            location_north,
+                            location_houston,
+                            location_south,
+                            location_west,
+                            location_panhandle,
+                            location_unknown,
+                        ],
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        st.caption(
+            "Location is a broad screening proxy. Node-level congestion, "
+            "basis, curtailment and market fundamentals can materially "
+            "differ within each ERCOT area."
+        )
+
+        st.caption(
+            f"Market / Revenue contributes {market_weight:.0%} of the total "
+            f"Opportunity Score. ERCOT Location therefore represents "
+            f"{location_market_weight * market_weight:.1%} of the total "
+            "score under the current assumptions."
+        )
+
+
+    # --------------------------------------------------------
+    # ACQUISITION VALUE
+    # --------------------------------------------------------
+    with st.expander(
+        "Acquisition Value — Tax Credit / Siting Attributes",
+        expanded=False
+    ):
 
         st.dataframe(
             pd.DataFrame(
@@ -2964,45 +3059,123 @@ with dashboard_tab:
                     ],
                 }
             ),
-
             use_container_width=True,
             hide_index=True
         )
 
-
         st.caption(
             "Domestic Content is not included in the automated score "
             "because Orennia does not currently expose project-level "
-            "Domestic Content qualification or bonus fields. "
-            "Equipment information can be used as a diligence reference "
-            "but is not treated as evidence of qualification."
+            "Domestic Content qualification or bonus fields. Equipment "
+            "information can be used as a diligence reference but is not "
+            "treated as evidence of qualification."
         )
-
-
-        st.markdown(
-            "#### Executability"
-        )
-
 
         st.caption(
-            f"Executability = Seller Actionability × "
+            f"Acquisition Value contributes {value_weight:.0%} of the total "
+            "Opportunity Score."
+        )
+
+
+    # --------------------------------------------------------
+    # EXECUTABILITY
+    # --------------------------------------------------------
+    with st.expander(
+        "Executability — Actionability + Timing + Development Stage",
+        expanded=False
+    ):
+
+        st.caption(
+            "Executability asks whether an identified opportunity can "
+            "realistically progress toward a transaction. It is separate "
+            "from Seller Motivation: a seller may have a reason to sell "
+            "without the opportunity being easy to execute."
+        )
+
+        st.markdown(
+            f"**Executability = Seller Actionability × "
             f"{actionability_weight:.0%} + Timing × "
             f"{timing_exec_weight:.0%} + Development Stage × "
-            f"{development_exec_weight:.0%}."
+            f"{development_exec_weight:.0%}**"
+        )
+
+        exec_col_1, exec_col_2 = st.columns(
+            2
+        )
+
+        with exec_col_1:
+
+            st.markdown(
+                "##### Seller Actionability"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Actionability": [
+                            "5 – Very High",
+                            "4 – High",
+                            "3 – Moderate",
+                            "2 – Low",
+                            "1 – Very Low",
+                        ],
+
+                        "Score": [
+                            100,
+                            80,
+                            60,
+                            40,
+                            20,
+                        ],
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        with exec_col_2:
+
+            st.markdown(
+                "##### Timing / COD"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Timing": [
+                            "COD Reached / Passed",
+                            "COD Within 1 Year",
+                            "COD Within 2 Years",
+                            "COD Within 3 Years",
+                            "COD >3 Years",
+                            "COD Missing",
+                        ],
+
+                        "Score": [
+                            timing_operating,
+                            timing_1,
+                            timing_2,
+                            timing_3,
+                            timing_long,
+                            timing_missing,
+                        ],
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        st.caption(
+            f"Executability contributes {exec_weight:.0%} of the total "
+            "Opportunity Score. Seller Actionability therefore has an "
+            f"effective direct influence of "
+            f"{actionability_weight * exec_weight:.1%} of the total score."
         )
 
 
     st.caption(
-        f"ERCOT Location represents "
-        f"{location_market_weight * market_weight:.1%} "
-        "of the total Opportunity Score under the current assumptions."
-    )
-
-
-    st.caption(
-        "Screening tool only — rankings prioritize sourcing and "
-        "diligence activity and are not a substitute for full "
-        "investment underwriting."
+        "Screening tool only — rankings prioritize sourcing and diligence "
+        "activity and are not a substitute for full investment underwriting."
     )
 
 
