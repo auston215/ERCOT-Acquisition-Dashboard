@@ -2435,10 +2435,57 @@ with dashboard_tab:
 
 
     # ========================================================
-    # 1. OPPORTUNITY SCORE — EXECUTIVE VIEW
+    # 1. HOW TO USE + SCORE GUIDE
     # ========================================================
     st.markdown(
-        "### 🎯 1. Opportunity Score"
+        "### 🧭 1. How to Use the Dashboard"
+    )
+
+    use_left, use_right = st.columns(
+        [1.25, 1]
+    )
+
+
+    with use_left:
+
+        st.markdown(
+            """
+            **1. Screen** — Start with the Management Shortlist and Top Acquisition Targets.  
+            **2. Understand** — Drill into the score breakdown for an individual project.  
+            **3. Compare** — Filter by technology, owner and ERCOT area; review bundle opportunities.  
+            **4. Investigate** — Use the Map Explorer and ERCOT Market Prices for deeper diligence and market context.
+            """
+        )
+
+
+    with use_right:
+
+        st.markdown(
+            "#### 🚦 Score Guide"
+        )
+
+        st.markdown(
+            """
+            **80+** → Contact / Diligence  
+            **70–79** → Investigate  
+            **60–69** → Monitor  
+            **<60** → Low Priority
+            """
+        )
+
+
+    st.caption(
+        "Data Completeness is not part of the weighted Opportunity Score. "
+        "It is used as a ranking tie-breaker after Opportunity Score, "
+        "followed by project capacity."
+    )
+
+
+    # ========================================================
+    # 2. OPPORTUNITY SCORE — EXECUTIVE VIEW
+    # ========================================================
+    st.markdown(
+        "### 🎯 2. Opportunity Score"
     )
 
     st.caption(
@@ -2500,7 +2547,7 @@ with dashboard_tab:
 
 
     # ========================================================
-    # 2. WORKED EXAMPLE — IMMEDIATELY AFTER FORMULA
+    # 3. WORKED EXAMPLE
     # ========================================================
     example_seller = (
         distress_4
@@ -2606,7 +2653,7 @@ with dashboard_tab:
 
 
     st.markdown(
-        "### 🧮 2. Worked Example"
+        "### 🧮 3. Worked Example"
     )
 
     st.caption(
@@ -2720,107 +2767,33 @@ with dashboard_tab:
 
 
     # ========================================================
-    # 3. HOW TO USE + SCORE GUIDE
-    # ========================================================
-    st.markdown(
-        "### 🧭 3. How to Use the Dashboard"
-    )
-
-    use_left, use_right = st.columns(
-        [1.25, 1]
-    )
-
-
-    with use_left:
-
-        st.markdown(
-            """
-            **1. Screen** — Start with the Management Shortlist and Top Acquisition Targets.  
-            **2. Understand** — Drill into the score breakdown for an individual project.  
-            **3. Compare** — Filter by technology, owner and ERCOT area; review bundle opportunities.  
-            **4. Investigate** — Use the Map Explorer and ERCOT Market Prices for deeper diligence and market context.
-            """
-        )
-
-
-    with use_right:
-
-        st.markdown(
-            "#### 🚦 Score Guide"
-        )
-
-        st.markdown(
-            """
-            **80+** → Contact / Diligence  
-            **70–79** → Investigate  
-            **60–69** → Monitor  
-            **<60** → Low Priority
-            """
-        )
-
-
-    st.markdown(
-        "#### Key Definitions"
-    )
-
-    definition_left, definition_right = st.columns(
-        2
-    )
-
-
-    with definition_left:
-
-        st.info(
-            "**Seller Motivation — Why would they sell?**\n\n"
-            "Measures the strength of the economic or strategic reason "
-            "the owner may be willing to transact. It is driven by "
-            "Discount Potential and adjusted for Confidence."
-        )
-
-
-    with definition_right:
-
-        st.info(
-            "**Executability — Can we actually turn it into a deal?**\n\n"
-            "Measures whether the opportunity can realistically progress "
-            "toward a transaction based on Seller Actionability, timing / "
-            "COD and Development Stage."
-        )
-
-
-    st.caption(
-        "Data Completeness is not part of the weighted Opportunity Score. "
-        "It is used as a ranking tie-breaker after Opportunity Score, "
-        "followed by project capacity."
-    )
-
-
-    # ========================================================
-    # 4. DETAILED SCORING METHODOLOGY
+    # 4. DETAILED SCORING METHODOLOGY — SINGLE DROPDOWN
     # ========================================================
     st.markdown(
         "### 📐 4. Detailed Scoring Methodology"
     )
 
     st.caption(
-        "Open a section below for the underlying scoring rules. These "
-        "details are intentionally kept below the executive summary so "
-        "the top of the page stays focused on how the ranking works."
+        "Open the dropdown below to review all underlying scoring rules."
     )
 
 
-    # --------------------------------------------------------
-    # SELLER MOTIVATION
-    # --------------------------------------------------------
     with st.expander(
-        "Seller Motivation — Discount Potential × Confidence",
+        "Open Detailed Scoring Methodology",
         expanded=False
     ):
 
+        # ----------------------------------------------------
+        # SELLER MOTIVATION
+        # ----------------------------------------------------
+        st.markdown(
+            "#### Seller Motivation — Discount Potential × Confidence"
+        )
+
         st.caption(
-            "Seller Motivation asks: why might this owner be willing to "
-            "transact? Discount Potential is a 1–5 qualitative assumption; "
-            "it is not an expected percentage purchase-price discount."
+            "Seller Motivation asks why the owner may be willing to transact. "
+            "Discount Potential is a 1–5 qualitative assumption; it is not an "
+            "expected percentage purchase-price discount."
         )
 
         st.markdown(
@@ -2887,14 +2860,15 @@ with dashboard_tab:
             "overall Opportunity Score."
         )
 
+        st.divider()
 
-    # --------------------------------------------------------
-    # DEVELOPMENT STAGE
-    # --------------------------------------------------------
-    with st.expander(
-        "Development Stage — Project Maturity",
-        expanded=False
-    ):
+
+        # ----------------------------------------------------
+        # DEVELOPMENT STAGE
+        # ----------------------------------------------------
+        st.markdown(
+            "#### Development Stage — Project Maturity"
+        )
 
         st.caption(
             "Development Stage rewards projects that are further advanced "
@@ -2940,14 +2914,15 @@ with dashboard_tab:
             f"{development_exec_weight:.0%} of Executability."
         )
 
+        st.divider()
 
-    # --------------------------------------------------------
-    # MARKET / REVENUE + LOCATION
-    # --------------------------------------------------------
-    with st.expander(
-        "Market / Revenue — Revenue Visibility + ERCOT Location",
-        expanded=False
-    ):
+
+        # ----------------------------------------------------
+        # MARKET / REVENUE + LOCATION
+        # ----------------------------------------------------
+        st.markdown(
+            "#### Market / Revenue — Revenue Visibility + ERCOT Location"
+        )
 
         st.markdown(
             f"**Market / Revenue = Revenue Visibility × "
@@ -3032,14 +3007,15 @@ with dashboard_tab:
             "score under the current assumptions."
         )
 
+        st.divider()
 
-    # --------------------------------------------------------
-    # ACQUISITION VALUE
-    # --------------------------------------------------------
-    with st.expander(
-        "Acquisition Value — Tax Credit / Siting Attributes",
-        expanded=False
-    ):
+
+        # ----------------------------------------------------
+        # ACQUISITION VALUE
+        # ----------------------------------------------------
+        st.markdown(
+            "#### Acquisition Value — Tax Credit / Siting Attributes"
+        )
 
         st.dataframe(
             pd.DataFrame(
@@ -3076,20 +3052,20 @@ with dashboard_tab:
             "Opportunity Score."
         )
 
+        st.divider()
 
-    # --------------------------------------------------------
-    # EXECUTABILITY
-    # --------------------------------------------------------
-    with st.expander(
-        "Executability — Actionability + Timing + Development Stage",
-        expanded=False
-    ):
+
+        # ----------------------------------------------------
+        # EXECUTABILITY
+        # ----------------------------------------------------
+        st.markdown(
+            "#### Executability — Actionability + Timing + Development Stage"
+        )
 
         st.caption(
-            "Executability asks whether an identified opportunity can "
-            "realistically progress toward a transaction. It is separate "
-            "from Seller Motivation: a seller may have a reason to sell "
-            "without the opportunity being easy to execute."
+            "Executability measures whether an identified opportunity can "
+            "realistically progress toward a transaction based on seller "
+            "actionability, timing / COD and Development Stage."
         )
 
         st.markdown(
