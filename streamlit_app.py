@@ -2651,9 +2651,45 @@ with dashboard_tab:
         )
 
 
+        example_seller_contribution = (
+            example_seller
+            * distress_weight
+        )
+
+        example_development_contribution = (
+            example_development
+            * development_weight
+        )
+
+        example_market_contribution = (
+            example_market
+            * market_weight
+        )
+
+        example_value_contribution = (
+            example_value
+            * value_weight
+        )
+
+        example_executability_contribution = (
+            example_executability
+            * exec_weight
+        )
+
+
         st.success(
-            f"Example Opportunity Score = "
-            f"{example_final:.1f}"
+            f"**{example_final:.1f} = "
+            f"({example_seller:.1f} × {distress_weight:.0%}) "
+            f"+ ({example_development:.1f} × {development_weight:.0%}) "
+            f"+ ({example_market:.1f} × {market_weight:.0%}) "
+            f"+ ({example_value:.1f} × {value_weight:.0%}) "
+            f"+ ({example_executability:.1f} × {exec_weight:.0%})**\n\n"
+            f"= {example_seller_contribution:.1f} "
+            f"+ {example_development_contribution:.1f} "
+            f"+ {example_market_contribution:.1f} "
+            f"+ {example_value_contribution:.1f} "
+            f"+ {example_executability_contribution:.1f} "
+            f"= **{example_final:.1f}**"
         )
 
 
