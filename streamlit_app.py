@@ -12,29 +12,32 @@ import pydeck as pdk
 import streamlit as st
 
 st.set_page_config(
-    page_title='ERCOT Acquisition Dashboard',
-    page_icon='⚡',
-    layout='wide'
+    page_title="ERCOT Acquisition Dashboard",
+    page_icon="⚡",
+    layout="wide"
 )
 
-st.title('⚡ ERCOT Acquisition Dashboard')
+st.title("⚡ ERCOT Acquisition Dashboard")
 st.caption(
-    'M&A screening tool for ERCOT solar, battery storage, '
-    'and operating wind projects'
+    "M&A screening tool for ERCOT solar, battery storage, "
+    "and operating wind projects"
 )
 
 SELLER_REFRESH_SECONDS = 6 * 60 * 60
 SELLER_LOOKBACK_DAYS = 180
 
 
+# ============================================================
+# HELPERS
+# ============================================================
 def clean_text(value):
     if pd.isna(value):
-        return ''
+        return ""
     return str(value).strip()
 
 
 def has_value(value):
-    return clean_text(value) != ''
+    return clean_text(value) != ""
 
 
 def owner_key(value):
@@ -43,125 +46,158 @@ def owner_key(value):
 
 def format_date(value):
     if pd.isna(value):
-        return 'N/A'
+        return "N/A"
 
     try:
-        return pd.to_datetime(value).strftime('%m/%d/%Y')
+        return pd.to_datetime(
+            value
+        ).strftime(
+            "%m/%d/%Y"
+        )
+
     except Exception:
-        return clean_text(value)
+        return clean_text(
+            value
+        )
 
 
 def strip_html(value):
     if value is None:
-        return ''
+        return ""
 
     text = re.sub(
-        '<[^>]+>',
-        ' ',
+        "<[^>]+>",
+        " ",
         str(value)
     )
 
-    text = html_lib.unescape(text)
+    text = html_lib.unescape(
+        text
+    )
 
     return re.sub(
-        '\\s+',
-        ' ',
+        "\\s+",
+        " ",
         text
     ).strip()
 
 
 def map_ercot_area(value):
-    zone = clean_text(value)
+
+    zone = clean_text(
+        value
+    )
 
     mapping = {
-        'Load Zone - North': 'ERCOT-N',
-        'North Hub': 'ERCOT-N',
+        "Load Zone - North":
+            "ERCOT-N",
 
-        'Load Zone - South': 'ERCOT-S',
-        'South Hub': 'ERCOT-S',
+        "North Hub":
+            "ERCOT-N",
 
-        'Load Zone - West': 'ERCOT-W',
-        'West Hub': 'ERCOT-W',
+        "Load Zone - South":
+            "ERCOT-S",
 
-        'Load Zone - Houston': 'ERCOT-H',
-        'Houston Hub': 'ERCOT-H',
+        "South Hub":
+            "ERCOT-S",
 
-        'Panhandle Hub': 'Panhandle'
+        "Load Zone - West":
+            "ERCOT-W",
+
+        "West Hub":
+            "ERCOT-W",
+
+        "Load Zone - Houston":
+            "ERCOT-H",
+
+        "Houston Hub":
+            "ERCOT-H",
+
+        "Panhandle Hub":
+            "Panhandle"
     }
 
     return mapping.get(
         zone,
-        zone if zone else 'Unknown'
+        zone if zone else "Unknown"
     )
 
 
 def to_numeric_series(series):
+
     return pd.to_numeric(
         series,
-        errors='coerce'
+        errors="coerce"
     )
 
 
-st.sidebar.header('1. Data')
+# ============================================================
+# SIDEBAR
+# ============================================================
+st.sidebar.header(
+    "1. Data"
+)
 
 uploaded_file = st.sidebar.file_uploader(
-    'Optional: Upload newer Orennia CSV',
-    type=['csv']
+    "Optional: Upload newer Orennia CSV",
+    type=[
+        "csv"
+    ]
 )
 
 st.sidebar.caption(
-    'Not required to view the Dashboard Guide.'
+    "Not required to view the Dashboard Guide."
 )
 
 st.sidebar.divider()
 
 st.sidebar.header(
-    '2. Opportunity Score Weights'
+    "2. Opportunity Score Weights"
 )
 
 distress_weight = st.sidebar.number_input(
-    'Seller Motivation',
+    "Seller Motivation",
     min_value=0.0,
     max_value=1.0,
     value=0.35,
     step=0.05,
-    key='distress_weight'
+    key="distress_weight"
 )
 
 development_weight = st.sidebar.number_input(
-    'Development Stage',
+    "Development Stage",
     min_value=0.0,
     max_value=1.0,
     value=0.25,
     step=0.05,
-    key='development_weight'
+    key="development_weight"
 )
 
 market_weight = st.sidebar.number_input(
-    'Market / Revenue',
+    "Market / Revenue",
     min_value=0.0,
     max_value=1.0,
     value=0.15,
     step=0.05,
-    key='market_weight'
+    key="market_weight"
 )
 
 value_weight = st.sidebar.number_input(
-    'Acquisition Value',
+    "Acquisition Value",
     min_value=0.0,
     max_value=1.0,
     value=0.10,
     step=0.05,
-    key='value_weight'
+    key="value_weight"
 )
 
 exec_weight = st.sidebar.number_input(
-    'Executability',
+    "Executability",
     min_value=0.0,
     max_value=1.0,
     value=0.15,
     step=0.05,
-    key='exec_weight'
+    key="exec_weight"
 )
 
 total_weight = (
@@ -173,240 +209,256 @@ total_weight = (
 )
 
 if abs(
-    total_weight - 1.0
+    total_weight
+    - 1.0
 ) > 0.001:
 
     st.sidebar.error(
-        f'Weights currently total '
-        f'{total_weight:.0%}. '
-        'They should total 100%.'
+        f"Weights currently total "
+        f"{total_weight:.0%}. "
+        "They should total 100%."
     )
 
 else:
 
     st.sidebar.success(
-        'Overall Weights = 100%'
+        "Overall Weights = 100%"
     )
 
 
 st.sidebar.divider()
 
 st.sidebar.header(
-    '3. Scoring Inputs'
+    "3. Scoring Inputs"
 )
 
 
+# ------------------------------------------------------------
+# SELLER MOTIVATION
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'Seller Motivation Points'
+    "Seller Motivation Points"
 ):
 
     distress_5 = st.number_input(
-        'Discount Potential 5',
+        "Discount Potential 5",
         value=100,
-        key='distress_5'
+        key="distress_5"
     )
 
     distress_4 = st.number_input(
-        'Discount Potential 4',
+        "Discount Potential 4",
         value=80,
-        key='distress_4'
+        key="distress_4"
     )
 
     distress_3 = st.number_input(
-        'Discount Potential 3',
+        "Discount Potential 3",
         value=60,
-        key='distress_3'
+        key="distress_3"
     )
 
     distress_2 = st.number_input(
-        'Discount Potential 2',
+        "Discount Potential 2",
         value=40,
-        key='distress_2'
+        key="distress_2"
     )
 
     distress_1 = st.number_input(
-        'Discount Potential 1',
+        "Discount Potential 1",
         value=20,
-        key='distress_1'
+        key="distress_1"
     )
 
     distress_none = st.number_input(
-        'No Seller Signal',
+        "No Seller Signal",
         value=0,
-        key='distress_none'
+        key="distress_none"
     )
 
     confidence_high = st.number_input(
-        'High Confidence Multiplier',
+        "High Confidence Multiplier",
         value=1.00,
         step=0.05,
-        key='confidence_high'
+        key="confidence_high"
     )
 
     confidence_medium = st.number_input(
-        'Medium Confidence Multiplier',
+        "Medium Confidence Multiplier",
         value=0.90,
         step=0.05,
-        key='confidence_medium'
+        key="confidence_medium"
     )
 
     confidence_low = st.number_input(
-        'Low Confidence Multiplier',
+        "Low Confidence Multiplier",
         value=0.75,
         step=0.05,
-        key='confidence_low'
+        key="confidence_low"
     )
 
 
+# ------------------------------------------------------------
+# DEVELOPMENT STAGE
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'Development Stage Points'
+    "Development Stage Points"
 ):
 
     development_operating = st.number_input(
-        'Operating',
+        "Operating",
         value=100,
-        key='development_operating'
+        key="development_operating"
     )
 
     development_50 = st.number_input(
-        '>50% Construction',
+        ">50% Construction",
         value=92,
-        key='development_50'
+        key="development_50"
     )
 
     development_construction = st.number_input(
-        'In Construction',
+        "In Construction",
         value=85,
-        key='development_construction'
+        key="development_construction"
     )
 
     development_ia = st.number_input(
-        'IA Executed',
+        "IA Executed",
         value=75,
-        key='development_ia'
+        key="development_ia"
     )
 
     development_fis_complete = st.number_input(
-        'FIS Completed',
+        "FIS Completed",
         value=65,
-        key='development_fis_complete'
+        key="development_fis_complete"
     )
 
     development_fis_started = st.number_input(
-        'FIS Started',
+        "FIS Started",
         value=55,
-        key='development_fis_started'
+        key="development_fis_started"
     )
 
     development_studies = st.number_input(
-        'Studies Undergoing',
+        "Studies Undergoing",
         value=45,
-        key='development_studies'
+        key="development_studies"
     )
 
     development_pre = st.number_input(
-        'Pre-Study',
+        "Pre-Study",
         value=35,
-        key='development_pre'
+        key="development_pre"
     )
 
     development_inactive = st.number_input(
-        'Inactive / Suspended / Retired',
+        "Inactive / Suspended / Retired",
         value=15,
-        key='development_inactive'
+        key="development_inactive"
     )
 
 
+# ------------------------------------------------------------
+# REVENUE VISIBILITY
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'Revenue Visibility Points'
+    "Revenue Visibility Points"
 ):
 
     market_both = st.number_input(
-        'Contract + Named Offtaker',
+        "Contract + Named Offtaker",
         value=95,
-        key='market_both'
+        key="market_both"
     )
 
     market_offtaker = st.number_input(
-        'Named Offtaker Only',
+        "Named Offtaker Only",
         value=90,
-        key='market_offtaker'
+        key="market_offtaker"
     )
 
     market_contract = st.number_input(
-        'Contract Only',
+        "Contract Only",
         value=80,
-        key='market_contract'
+        key="market_contract"
     )
 
     market_none = st.number_input(
-        'Neither Contract nor Offtaker',
+        "Neither Contract nor Offtaker",
         value=45,
-        key='market_none'
+        key="market_none"
     )
 
 
+# ------------------------------------------------------------
+# ERCOT LOCATION
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'ERCOT Location Points'
+    "ERCOT Location Points"
 ):
 
     location_north = st.number_input(
-        'ERCOT-N',
+        "ERCOT-N",
         value=90,
-        key='location_north'
+        key="location_north"
     )
 
     location_houston = st.number_input(
-        'ERCOT-H',
+        "ERCOT-H",
         value=85,
-        key='location_houston'
+        key="location_houston"
     )
 
     location_south = st.number_input(
-        'ERCOT-S',
+        "ERCOT-S",
         value=70,
-        key='location_south'
+        key="location_south"
     )
 
     location_west = st.number_input(
-        'ERCOT-W',
+        "ERCOT-W",
         value=60,
-        key='location_west'
+        key="location_west"
     )
 
     location_panhandle = st.number_input(
-        'Panhandle',
+        "Panhandle",
         value=50,
-        key='location_panhandle'
+        key="location_panhandle"
     )
 
     location_unknown = st.number_input(
-        'Unknown / Other',
+        "Unknown / Other",
         value=50,
-        key='location_unknown'
+        key="location_unknown"
     )
 
 
+# ------------------------------------------------------------
+# MARKET / REVENUE MIX
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'Market / Revenue Mix'
+    "Market / Revenue Mix"
 ):
 
     revenue_visibility_weight = st.number_input(
-        'Revenue Visibility %',
+        "Revenue Visibility %",
         min_value=0.0,
         max_value=1.0,
         value=0.70,
         step=0.05,
-        key='revenue_visibility_weight'
+        key="revenue_visibility_weight"
     )
 
     location_market_weight = st.number_input(
-        'ERCOT Location %',
+        "ERCOT Location %",
         min_value=0.0,
         max_value=1.0,
         value=0.30,
         step=0.05,
-        key='location_market_weight'
+        key="location_market_weight"
     )
 
 
@@ -416,115 +468,125 @@ market_mix_total = (
 )
 
 if abs(
-    market_mix_total - 1.0
+    market_mix_total
+    - 1.0
 ) > 0.001:
 
     st.sidebar.warning(
-        f'Market / Revenue mix totals '
-        f'{market_mix_total:.0%}. '
-        'It should equal 100%.'
+        f"Market / Revenue mix totals "
+        f"{market_mix_total:.0%}. "
+        "It should equal 100%."
     )
 
 
+# ------------------------------------------------------------
+# ACQUISITION VALUE
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'Acquisition Value Points'
+    "Acquisition Value Points"
 ):
 
     value_both = st.number_input(
-        'Tax Credit + Energy Community',
+        "Tax Credit + Energy Community",
         value=75,
-        key='value_both'
+        key="value_both"
     )
 
     value_tax = st.number_input(
-        'Tax Credit Only',
+        "Tax Credit Only",
         value=70,
-        key='value_tax'
+        key="value_tax"
     )
 
     value_ec = st.number_input(
-        'Energy Community Only',
+        "Energy Community Only",
         value=60,
-        key='value_ec'
+        key="value_ec"
     )
 
     value_none = st.number_input(
-        'Neither Tax Credit nor Energy Community',
+        "Neither Tax Credit nor Energy Community",
         value=55,
-        key='value_none'
+        key="value_none"
     )
 
 
+# ------------------------------------------------------------
+# TIMING
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'Timing Points'
+    "Timing Points"
 ):
 
     timing_operating = st.number_input(
-        'COD Reached / Passed',
+        "COD Reached / Passed",
         value=100,
-        key='timing_operating'
+        key="timing_operating"
     )
 
     timing_1 = st.number_input(
-        'COD Within 1 Year',
+        "COD Within 1 Year",
         value=90,
-        key='timing_1'
+        key="timing_1"
     )
 
     timing_2 = st.number_input(
-        'COD Within 2 Years',
+        "COD Within 2 Years",
         value=75,
-        key='timing_2'
+        key="timing_2"
     )
 
     timing_3 = st.number_input(
-        'COD Within 3 Years',
+        "COD Within 3 Years",
         value=60,
-        key='timing_3'
+        key="timing_3"
     )
 
     timing_long = st.number_input(
-        'COD >3 Years',
+        "COD >3 Years",
         value=45,
-        key='timing_long'
+        key="timing_long"
     )
 
     timing_missing = st.number_input(
-        'COD Missing',
+        "COD Missing",
         value=50,
-        key='timing_missing'
+        key="timing_missing"
     )
 
 
+# ------------------------------------------------------------
+# EXECUTABILITY
+# ------------------------------------------------------------
 with st.sidebar.expander(
-    'Executability Mix'
+    "Executability Mix"
 ):
 
     actionability_weight = st.number_input(
-        'Seller Actionability %',
+        "Seller Actionability %",
         min_value=0.0,
         max_value=1.0,
         value=0.50,
         step=0.05,
-        key='actionability_weight'
+        key="actionability_weight"
     )
 
     timing_exec_weight = st.number_input(
-        'Timing %',
+        "Timing %",
         min_value=0.0,
         max_value=1.0,
         value=0.30,
         step=0.05,
-        key='timing_exec_weight'
+        key="timing_exec_weight"
     )
 
     development_exec_weight = st.number_input(
-        'Development Stage %',
+        "Development Stage %",
         min_value=0.0,
         max_value=1.0,
         value=0.20,
         step=0.05,
-        key='development_exec_weight'
+        key="development_exec_weight"
     )
 
 
@@ -535,16 +597,20 @@ exec_mix_total = (
 )
 
 if abs(
-    exec_mix_total - 1.0
+    exec_mix_total
+    - 1.0
 ) > 0.001:
 
     st.sidebar.warning(
-        f'Executability mix totals '
-        f'{exec_mix_total:.0%}. '
-        'It should equal 100%.'
+        f"Executability mix totals "
+        f"{exec_mix_total:.0%}. "
+        "It should equal 100%."
     )
 
 
+# ============================================================
+# SCORE MAPPINGS
+# ============================================================
 discount_score_map = {
     5: distress_5,
     4: distress_4,
@@ -554,9 +620,9 @@ discount_score_map = {
 }
 
 confidence_score_map = {
-    'High': confidence_high,
-    'Medium': confidence_medium,
-    'Low': confidence_low
+    "High": confidence_high,
+    "Medium": confidence_medium,
+    "Low": confidence_low
 }
 
 actionability_points = {
@@ -568,12 +634,12 @@ actionability_points = {
 }
 
 location_points = {
-    'ERCOT-N': location_north,
-    'ERCOT-H': location_houston,
-    'ERCOT-S': location_south,
-    'ERCOT-W': location_west,
-    'Panhandle': location_panhandle,
-    'Unknown': location_unknown
+    "ERCOT-N": location_north,
+    "ERCOT-H": location_houston,
+    "ERCOT-S": location_south,
+    "ERCOT-W": location_west,
+    "Panhandle": location_panhandle,
+    "Unknown": location_unknown
 }
 
 
@@ -642,6 +708,7 @@ def actionability_score(
 def location_score(
     area
 ):
+
     return location_points.get(
         clean_text(
             area
@@ -650,108 +717,103 @@ def location_score(
     )
 
 
+# ============================================================
+# SELLER ASSUMPTIONS
+# ============================================================
 seller_signals = pd.DataFrame(
     [
         [
-            'Birch Creek Energy',
+            "Birch Creek Energy",
             5,
             5,
-            'Medium'
+            "Medium"
         ],
-
         [
-            'Birch Creek Development',
+            "Birch Creek Development",
             5,
             5,
-            'Medium'
+            "Medium"
         ],
-
         [
-            'esVolta',
+            "esVolta",
             4,
             5,
-            'High'
+            "High"
         ],
-
         [
-            'Key Capture Energy',
+            "Key Capture Energy",
             4,
             5,
-            'High'
+            "High"
         ],
-
         [
-            'Lightsource BP',
+            "Lightsource BP",
             3,
             4,
-            'High'
+            "High"
         ],
-
         [
-            'Ørsted U.S. Onshore',
+            "Ørsted U.S. Onshore",
             3,
             4,
-            'Medium'
+            "Medium"
         ],
-
         [
-            'Orsted',
+            "Orsted",
             3,
             4,
-            'Medium'
+            "Medium"
         ],
-
         [
-            'Flatiron Energy',
+            "Flatiron Energy",
             2,
             4,
-            'High'
+            "High"
         ],
-
         [
-            'Recurrent Energy',
+            "Recurrent Energy",
             2,
             2,
-            'Medium'
+            "Medium"
         ],
-
         [
-            'EDF power solutions North America',
+            "EDF power solutions North America",
             1,
             1,
-            'High'
+            "High"
         ],
-
         [
-            'EDF Renewables',
+            "EDF Renewables",
             1,
             1,
-            'High'
+            "High"
         ],
-
         [
-            'Greenbacker Renewable Energy Company',
+            "Greenbacker Renewable Energy Company",
             1,
             1,
-            'High'
+            "High"
         ]
     ],
     columns=[
-        'Owner',
-        'Discount Potential',
-        'Seller Actionability',
-        'Confidence'
+        "Owner",
+        "Discount Potential",
+        "Seller Actionability",
+        "Confidence"
     ]
 )
 
 
-if 'seller_assumptions' not in st.session_state:
+if "seller_assumptions" not in st.session_state:
 
     st.session_state[
-        'seller_assumptions'
+        "seller_assumptions"
     ] = seller_signals.copy()
 
 
+# ============================================================
+# MAIN TABS
+# ============================================================
 (
     dashboard_tab,
     map_tab,
@@ -759,38 +821,42 @@ if 'seller_assumptions' not in st.session_state:
     price_tab
 ) = st.tabs(
     [
-        '📊 Acquisition Dashboard',
-        '🗺️ Map Explorer',
-        '🎯 ERCOT Competitor Due Diligence',
-        '📈 ERCOT Market Prices'
+        "📊 Acquisition Dashboard",
+        "🗺️ Map Explorer",
+        "🎯 ERCOT Competitor Due Diligence",
+        "📈 ERCOT Market Prices"
     ]
 )
 
 
+# ============================================================
+# ERCOT MARKET PRICE HELPERS
+# ============================================================
 ERCOT_RT_SPP_URL = (
-    'https://www.ercot.com/content/cdr/html/'
-    'real_time_spp.html'
+    "https://www.ercot.com/content/cdr/html/"
+    "real_time_spp.html"
 )
 
 ERCOT_LATEST_LMP_URL = (
-    'https://www.ercot.com/content/cdr/html/'
-    'hb_lz.html'
+    "https://www.ercot.com/content/cdr/html/"
+    "hb_lz.html"
 )
 
 ERCOT_DAM_SPP_URL = (
-    'https://www.ercot.com/content/cdr/html/'
-    'dam_spp.html'
+    "https://www.ercot.com/content/cdr/html/"
+    "dam_spp.html"
 )
 
 ERCOT_DAM_MCPC_URL = (
-    'https://www.ercot.com/content/cdr/html/'
-    'dam_mcpc.html'
+    "https://www.ercot.com/content/cdr/html/"
+    "dam_mcpc.html"
 )
 
 
 class ERCOTHTMLTableParser:
 
     def __init__(self):
+
         self.tables = []
         self.current_table = None
         self.current_row = None
@@ -818,33 +884,37 @@ class ERCOTHTMLTableParser:
 
                 tag = tag.lower()
 
-                if tag == 'table':
+                if tag == "table":
+
                     parent.current_table = []
 
                 elif (
-                    tag == 'tr'
+                    tag == "tr"
                     and parent.current_table
                     is not None
                 ):
+
                     parent.current_row = []
 
                 elif (
                     tag in [
-                        'td',
-                        'th'
+                        "td",
+                        "th"
                     ]
                     and parent.current_row
                     is not None
                 ):
+
                     parent.current_cell = []
                     parent.in_cell = True
 
                 elif (
-                    tag == 'br'
+                    tag == "br"
                     and parent.in_cell
                 ):
+
                     parent.current_cell.append(
-                        ' '
+                        " "
                     )
 
             def handle_data(
@@ -857,6 +927,7 @@ class ERCOTHTMLTableParser:
                     and parent.current_cell
                     is not None
                 ):
+
                     parent.current_cell.append(
                         data
                     )
@@ -870,16 +941,16 @@ class ERCOTHTMLTableParser:
 
                 if (
                     tag in [
-                        'td',
-                        'th'
+                        "td",
+                        "th"
                     ]
                     and parent.in_cell
                 ):
 
                     value = re.sub(
-                        '\\s+',
-                        ' ',
-                        ''.join(
+                        "\\s+",
+                        " ",
+                        "".join(
                             parent.current_cell
                         )
                     ).strip()
@@ -892,7 +963,7 @@ class ERCOTHTMLTableParser:
                     parent.in_cell = False
 
                 elif (
-                    tag == 'tr'
+                    tag == "tr"
                     and parent.current_row
                     is not None
                 ):
@@ -904,6 +975,7 @@ class ERCOTHTMLTableParser:
                         for x
                         in parent.current_row
                     ):
+
                         parent.current_table.append(
                             parent.current_row
                         )
@@ -911,12 +983,13 @@ class ERCOTHTMLTableParser:
                     parent.current_row = None
 
                 elif (
-                    tag == 'table'
+                    tag == "table"
                     and parent.current_table
                     is not None
                 ):
 
                     if parent.current_table:
+
                         parent.tables.append(
                             parent.current_table
                         )
@@ -953,20 +1026,24 @@ def parse_ercot_html_table(
 
             header = [
                 re.sub(
-                    '\\s+',
-                    ' ',
+                    "\\s+",
+                    " ",
                     clean_text(
                         value
                     )
                 ).strip()
-                for value in row
+
+                for value
+                in row
             ]
 
             if not all(
-                required in header
+                required
+                in header
                 for required
                 in required_columns
             ):
+
                 continue
 
             width = len(
@@ -981,12 +1058,13 @@ def parse_ercot_html_table(
 
                 values = [
                     re.sub(
-                        '\\s+',
-                        ' ',
+                        "\\s+",
+                        " ",
                         clean_text(
                             value
                         )
                     ).strip()
+
                     for value
                     in data_row
                 ]
@@ -997,7 +1075,7 @@ def parse_ercot_html_table(
 
                     values = (
                         values
-                        + ['']
+                        + [""]
                         * (
                             width
                             - len(
@@ -1013,9 +1091,11 @@ def parse_ercot_html_table(
                 if not any(
                     values
                 ):
+
                     continue
 
                 if values == header:
+
                     continue
 
                 data_rows.append(
@@ -1030,8 +1110,8 @@ def parse_ercot_html_table(
                 )
 
     raise ValueError(
-        'ERCOT price table was not found '
-        'in the returned HTML.'
+        "ERCOT price table was not found "
+        "in the returned HTML."
     )
 
 
@@ -1042,34 +1122,35 @@ def normalize_ercot_price_table(
 
     result = frame.copy()
 
-    if 'Oper Day' not in result.columns:
+    if "Oper Day" not in result.columns:
 
         raise ValueError(
-            'ERCOT table is missing Oper Day.'
+            "ERCOT table is missing Oper Day."
         )
 
     if time_column not in result.columns:
 
         raise ValueError(
-            f'ERCOT table is missing '
-            f'{time_column}.'
+            f"ERCOT table is missing "
+            f"{time_column}."
         )
 
     result[
-        'Oper Day'
+        "Oper Day"
     ] = pd.to_datetime(
         result[
-            'Oper Day'
+            "Oper Day"
         ],
-        errors='coerce'
+        errors="coerce"
     )
 
     for column in result.columns:
 
         if column in [
-            'Oper Day',
+            "Oper Day",
             time_column
         ]:
+
             continue
 
         cleaned = (
@@ -1080,13 +1161,13 @@ def normalize_ercot_price_table(
                 str
             )
             .str.replace(
-                ',',
-                '',
+                ",",
+                "",
                 regex=False
             )
             .str.replace(
-                '$',
-                '',
+                "$",
+                "",
                 regex=False
             )
             .str.strip()
@@ -1096,12 +1177,12 @@ def normalize_ercot_price_table(
             column
         ] = pd.to_numeric(
             cleaned,
-            errors='coerce'
+            errors="coerce"
         )
 
     result = result[
         result[
-            'Oper Day'
+            "Oper Day"
         ].notna()
     ].copy()
 
@@ -1115,12 +1196,12 @@ def _download_ercot_html(
     request = urllib.request.Request(
         url,
         headers={
-            'User-Agent':
-                'Mozilla/5.0 '
-                'ERCOT-Acquisition-Dashboard/1.0',
+            "User-Agent":
+                "Mozilla/5.0 "
+                "ERCOT-Acquisition-Dashboard/1.0",
 
-            'Accept':
-                'text/html,application/xhtml+xml'
+            "Accept":
+                "text/html,application/xhtml+xml"
         }
     )
 
@@ -1130,8 +1211,8 @@ def _download_ercot_html(
     ) as response:
 
         return response.read().decode(
-            'utf-8',
-            errors='replace'
+            "utf-8",
+            errors="replace"
         )
 
 
@@ -1185,8 +1266,8 @@ def _fetch_first_ercot_table(
         raise last_error
 
     raise ValueError(
-        'No ERCOT market-price table '
-        'was available.'
+        "No ERCOT market-price table "
+        "was available."
     )
 
 
@@ -1197,7 +1278,7 @@ def _ercot_operating_day_urls(
 
     now_central = (
         pd.Timestamp.now(
-            tz='America/Chicago'
+            tz="America/Chicago"
         )
     )
 
@@ -1214,11 +1295,12 @@ def _ercot_operating_day_urls(
 
     dated_urls = [
         (
-            'https://www.ercot.com/'
-            'content/cdr/html/'
+            "https://www.ercot.com/"
+            "content/cdr/html/"
             f"{day.strftime('%Y%m%d')}_"
-            f'{report_name}.html'
+            f"{report_name}.html"
         )
+
         for day in [
             today,
             yesterday
@@ -1228,9 +1310,9 @@ def _ercot_operating_day_urls(
     if include_generic:
 
         generic = (
-            'https://www.ercot.com/'
-            'content/cdr/html/'
-            f'{report_name}.html'
+            "https://www.ercot.com/"
+            "content/cdr/html/"
+            f"{report_name}.html"
         )
 
         return [
@@ -1250,23 +1332,23 @@ def _parse_ercot_numeric_value(
             value
         )
         .replace(
-            ',',
-            ''
+            ",",
+            ""
         )
         .replace(
-            '$',
-            ''
+            "$",
+            ""
         )
         .strip()
     )
 
-    if cleaned == '':
+    if cleaned == "":
 
         return np.nan
 
     return pd.to_numeric(
         cleaned,
-        errors='coerce'
+        errors="coerce"
     )
 
 
@@ -1288,17 +1370,19 @@ def parse_ercot_latest_lmp_table(
 
             values = [
                 re.sub(
-                    '\\s+',
-                    ' ',
+                    "\\s+",
+                    " ",
                     clean_text(
                         value
                     )
                 ).strip()
+
                 for value
                 in raw_row
             ]
 
             if not values:
+
                 continue
 
             settlement_point = (
@@ -1307,15 +1391,17 @@ def parse_ercot_latest_lmp_table(
             )
 
             if not re.fullmatch(
-                '(?:HB|LZ)_[A-Z0-9_]+',
+                "(?:HB|LZ)_[A-Z0-9_]+",
                 settlement_point
             ):
+
                 continue
 
             numeric_values = [
                 _parse_ercot_numeric_value(
                     value
                 )
+
                 for value
                 in values[1:]
             ]
@@ -1330,17 +1416,18 @@ def parse_ercot_latest_lmp_table(
             ]
 
             if not numeric_values:
+
                 continue
 
             rows.append(
                 {
-                    'Settlement Point':
+                    "Settlement Point":
                         settlement_point,
 
-                    'LMP':
+                    "LMP":
                         numeric_values[0],
 
-                    '5 Min Change to LMP':
+                    "5 Min Change to LMP":
                         (
                             numeric_values[1]
                             if len(
@@ -1349,7 +1436,7 @@ def parse_ercot_latest_lmp_table(
                             else np.nan
                         ),
 
-                    'RTRDPA + LMP':
+                    "RTRDPA + LMP":
                         (
                             numeric_values[2]
                             if len(
@@ -1358,7 +1445,7 @@ def parse_ercot_latest_lmp_table(
                             else np.nan
                         ),
 
-                    '5 Min Change to RTRDPA + LMP':
+                    "5 Min Change to RTRDPA + LMP":
                         (
                             numeric_values[3]
                             if len(
@@ -1374,22 +1461,22 @@ def parse_ercot_latest_lmp_table(
         visible_text = (
             html_lib.unescape(
                 re.sub(
-                    '<[^>]+>',
-                    ' | ',
+                    "<[^>]+>",
+                    " | ",
                     html_text
                 )
             )
         )
 
         visible_text = re.sub(
-            '\\s+',
-            ' ',
+            "\\s+",
+            " ",
             visible_text
         )
 
         point_matches = list(
             re.finditer(
-                '\\b(?:HB|LZ)_[A-Z0-9_]+\\b',
+                "\\b(?:HB|LZ)_[A-Z0-9_]+\\b",
                 visible_text,
                 flags=re.IGNORECASE
             )
@@ -1410,12 +1497,14 @@ def parse_ercot_latest_lmp_table(
                 point_matches[
                     index + 1
                 ].start()
+
                 if (
                     index + 1
                     < len(
                         point_matches
                     )
                 )
+
                 else min(
                     len(
                         visible_text
@@ -1432,11 +1521,11 @@ def parse_ercot_latest_lmp_table(
 
             number_matches = (
                 re.findall(
-                    '(?<![A-Za-z0-9_])'
-                    '[-+]?\\$?'
-                    '\\d{1,6}'
-                    '(?:,\\d{3})*'
-                    '(?:\\.\\d+)?',
+                    "(?<![A-Za-z0-9_])"
+                    "[-+]?\\$?"
+                    "\\d{1,6}"
+                    "(?:,\\d{3})*"
+                    "(?:\\.\\d+)?",
                     segment
                 )
             )
@@ -1445,6 +1534,7 @@ def parse_ercot_latest_lmp_table(
                 _parse_ercot_numeric_value(
                     value
                 )
+
                 for value
                 in number_matches[
                     :4
@@ -1461,17 +1551,18 @@ def parse_ercot_latest_lmp_table(
             ]
 
             if not numeric_values:
+
                 continue
 
             rows.append(
                 {
-                    'Settlement Point':
+                    "Settlement Point":
                         settlement_point,
 
-                    'LMP':
+                    "LMP":
                         numeric_values[0],
 
-                    '5 Min Change to LMP':
+                    "5 Min Change to LMP":
                         (
                             numeric_values[1]
                             if len(
@@ -1480,7 +1571,7 @@ def parse_ercot_latest_lmp_table(
                             else np.nan
                         ),
 
-                    'RTRDPA + LMP':
+                    "RTRDPA + LMP":
                         (
                             numeric_values[2]
                             if len(
@@ -1489,7 +1580,7 @@ def parse_ercot_latest_lmp_table(
                             else np.nan
                         ),
 
-                    '5 Min Change to RTRDPA + LMP':
+                    "5 Min Change to RTRDPA + LMP":
                         (
                             numeric_values[3]
                             if len(
@@ -1503,8 +1594,8 @@ def parse_ercot_latest_lmp_table(
     if not rows:
 
         raise ValueError(
-            'ERCOT SCED LMP rows were '
-            'not found in the returned HTML.'
+            "ERCOT SCED LMP rows were "
+            "not found in the returned HTML."
         )
 
     table = pd.DataFrame(
@@ -1515,12 +1606,12 @@ def parse_ercot_latest_lmp_table(
         table
         .drop_duplicates(
             subset=[
-                'Settlement Point'
+                "Settlement Point"
             ],
-            keep='first'
+            keep="first"
         )
         .sort_values(
-            'Settlement Point'
+            "Settlement Point"
         )
         .reset_index(
             drop=True
@@ -1540,11 +1631,11 @@ def extract_ercot_lmp_last_updated(
 
     match = re.search(
         (
-            'Last Updated:\\s*'
-            '([A-Za-z]{3}\\s+'
-            '\\d{1,2},\\s+'
-            '\\d{4}\\s+'
-            '\\d{1,2}:\\d{2}:\\d{2})'
+            "Last Updated:\\s*"
+            "([A-Za-z]{3}\\s+"
+            "\\d{1,2},\\s+"
+            "\\d{4}\\s+"
+            "\\d{1,2}:\\d{2}:\\d{2})"
         ),
         visible_text,
         flags=re.IGNORECASE
@@ -1558,7 +1649,7 @@ def extract_ercot_lmp_last_updated(
         match.group(
             1
         ),
-        errors='coerce'
+        errors="coerce"
     )
 
 
@@ -1581,7 +1672,7 @@ def fetch_ercot_latest_lmp():
     )
 
     table[
-        'ERCOT Last Updated'
+        "ERCOT Last Updated"
     ] = (
         extract_ercot_lmp_last_updated(
             html_text
@@ -1602,18 +1693,18 @@ def fetch_ercot_rt_spp():
 
     urls = (
         _ercot_operating_day_urls(
-            'real_time_spp',
+            "real_time_spp",
             include_generic=True
         )
     )
 
     return _fetch_first_ercot_table(
         candidate_urls=urls,
-        time_column='Interval Ending',
+        time_column="Interval Ending",
         required_columns=[
-            'Oper Day',
-            'Interval Ending',
-            'HB_NORTH'
+            "Oper Day",
+            "Interval Ending",
+            "HB_NORTH"
         ]
     )
 
@@ -1626,18 +1717,18 @@ def fetch_ercot_dam_spp():
 
     urls = (
         _ercot_operating_day_urls(
-            'dam_spp',
+            "dam_spp",
             include_generic=True
         )
     )
 
     return _fetch_first_ercot_table(
         candidate_urls=urls,
-        time_column='Hour Ending',
+        time_column="Hour Ending",
         required_columns=[
-            'Oper Day',
-            'Hour Ending',
-            'HB_NORTH'
+            "Oper Day",
+            "Hour Ending",
+            "HB_NORTH"
         ]
     )
 
@@ -1650,7 +1741,7 @@ def fetch_ercot_dam_mcpc():
 
     dated_urls = (
         _ercot_operating_day_urls(
-            'dam_mcpc',
+            "dam_mcpc",
             include_generic=False
         )
     )
@@ -1662,12 +1753,12 @@ def fetch_ercot_dam_mcpc():
 
     return _fetch_first_ercot_table(
         candidate_urls=urls,
-        time_column='Hour Ending',
+        time_column="Hour Ending",
         required_columns=[
-            'Oper Day',
-            'Hour Ending',
-            'NON-SPIN',
-            'ECRS'
+            "Oper Day",
+            "Hour Ending",
+            "NON-SPIN",
+            "ECRS"
         ]
     )
 
@@ -1679,23 +1770,25 @@ def ercot_interval_timestamp(
 
     day = pd.to_datetime(
         operating_day,
-        errors='coerce'
+        errors="coerce"
     )
 
     if pd.isna(
         day
     ):
+
         return pd.NaT
 
     digits = re.sub(
-        '\\D',
-        '',
+        "\\D",
+        "",
         clean_text(
             interval_ending
         )
     )
 
     if not digits:
+
         return pd.NaT
 
     digits = (
@@ -1749,12 +1842,13 @@ def ercot_hour_timestamp(
 
     day = pd.to_datetime(
         operating_day,
-        errors='coerce'
+        errors="coerce"
     )
 
     if pd.isna(
         day
     ):
+
         return pd.NaT
 
     try:
@@ -1793,8 +1887,8 @@ def rt_interval_to_hour_ending(
 ):
 
     digits = re.sub(
-        '\\D',
-        '',
+        "\\D",
+        "",
         clean_text(
             interval_ending
         )
@@ -1848,17 +1942,17 @@ def market_price_signal(
         latest_price
     ):
 
-        return 'N/A'
+        return "N/A"
 
     if latest_price < 0:
 
-        return 'Negative'
+        return "Negative"
 
     if pd.isna(
         daily_average
     ):
 
-        return 'Current'
+        return "Current"
 
     difference = (
         latest_price
@@ -1867,13 +1961,13 @@ def market_price_signal(
 
     if difference >= 30:
 
-        return 'Elevated'
+        return "Elevated"
 
     if difference <= -20:
 
-        return 'Soft'
+        return "Soft"
 
-    return 'Normal'
+    return "Normal"
 
 
 def price_metric_value(
@@ -1884,44 +1978,44 @@ def price_metric_value(
         value
     ):
 
-        return 'N/A'
+        return "N/A"
 
     return (
-        f'${value:,.2f}/MWh'
+        f"${value:,.2f}/MWh"
     )
 
 
+# ============================================================
+# MARKET PRICES TAB
+# ============================================================
 market_lmp_df = pd.DataFrame()
 market_rt_df = pd.DataFrame()
 market_dam_df = pd.DataFrame()
 market_mcpc_df = pd.DataFrame()
 
-market_lmp_source = ''
-market_rt_source = ''
-market_dam_source = ''
-market_mcpc_source = ''
+market_lmp_source = ""
+market_rt_source = ""
+market_dam_source = ""
+market_mcpc_source = ""
 
 
 with price_tab:
 
     st.markdown(
-        '## 📈 ERCOT Market Prices'
+        "## 📈 ERCOT Market Prices"
     )
 
     st.caption(
-        'Live market screen sourced directly '
-        'from ERCOT public Current Day Reports. '
-        'Real-Time SPP refreshes on a five-minute '
-        'cache; Day-Ahead energy and ancillary-'
-        'service prices refresh hourly. Market '
-        'data is informational and does not '
-        'change the acquisition Opportunity Score.'
+        "Live market screen sourced directly "
+        "from ERCOT public Current Day Reports. "
+        "Real-Time SPP refreshes on a five-minute "
+        "cache; Day-Ahead energy and ancillary-"
+        "service prices refresh hourly. Market "
+        "data is informational and does not "
+        "change the acquisition Opportunity Score."
     )
 
-    (
-        refresh_col,
-        source_col
-    ) = st.columns(
+    refresh_col, source_col = st.columns(
         [
             1,
             4
@@ -1932,9 +2026,9 @@ with price_tab:
 
         refresh_market_prices = (
             st.button(
-                '🔄 Refresh ERCOT Prices',
+                "🔄 Refresh ERCOT Prices",
                 key=
-                    'refresh_ercot_market_prices'
+                    "refresh_ercot_market_prices"
             )
         )
 
@@ -1950,18 +2044,18 @@ with price_tab:
     with source_col:
 
         st.caption(
-            'Latest SCED LMP excludes Real-Time '
-            'price adders; RT SPP includes ERCOT '
-            'Real-Time Reliability Deployment '
-            'Price Adders. Project-area comparisons '
-            'use broad hub benchmarks and are not '
-            'node-level project prices.'
+            "Latest SCED LMP excludes Real-Time "
+            "price adders; RT SPP includes ERCOT "
+            "Real-Time Reliability Deployment "
+            "Price Adders. Project-area comparisons "
+            "use broad hub benchmarks and are not "
+            "node-level project prices."
         )
 
-    lmp_error = ''
-    rt_error = ''
-    dam_error = ''
-    mcpc_error = ''
+    lmp_error = ""
+    rt_error = ""
+    dam_error = ""
+    mcpc_error = ""
 
     try:
 
@@ -1984,15 +2078,15 @@ with price_tab:
         ) = fetch_ercot_rt_spp()
 
         market_rt_df[
-            'Timestamp'
+            "Timestamp"
         ] = market_rt_df.apply(
             lambda row:
                 ercot_interval_timestamp(
                     row[
-                        'Oper Day'
+                        "Oper Day"
                     ],
                     row[
-                        'Interval Ending'
+                        "Interval Ending"
                     ]
                 ),
             axis=1
@@ -2001,11 +2095,11 @@ with price_tab:
         market_rt_df = (
             market_rt_df[
                 market_rt_df[
-                    'Timestamp'
+                    "Timestamp"
                 ].notna()
             ]
             .sort_values(
-                'Timestamp'
+                "Timestamp"
             )
             .reset_index(
                 drop=True
@@ -2026,37 +2120,37 @@ with price_tab:
         ) = fetch_ercot_dam_spp()
 
         market_dam_df[
-            'Timestamp'
+            "Timestamp"
         ] = market_dam_df.apply(
             lambda row:
                 ercot_hour_timestamp(
                     row[
-                        'Oper Day'
+                        "Oper Day"
                     ],
                     row[
-                        'Hour Ending'
+                        "Hour Ending"
                     ]
                 ),
             axis=1
         )
 
         market_dam_df[
-            'Hour Ending Numeric'
+            "Hour Ending Numeric"
         ] = pd.to_numeric(
             market_dam_df[
-                'Hour Ending'
+                "Hour Ending"
             ],
-            errors='coerce'
+            errors="coerce"
         )
 
         market_dam_df = (
             market_dam_df[
                 market_dam_df[
-                    'Timestamp'
+                    "Timestamp"
                 ].notna()
             ]
             .sort_values(
-                'Timestamp'
+                "Timestamp"
             )
             .reset_index(
                 drop=True
@@ -2077,15 +2171,15 @@ with price_tab:
         ) = fetch_ercot_dam_mcpc()
 
         market_mcpc_df[
-            'Timestamp'
+            "Timestamp"
         ] = market_mcpc_df.apply(
             lambda row:
                 ercot_hour_timestamp(
                     row[
-                        'Oper Day'
+                        "Oper Day"
                     ],
                     row[
-                        'Hour Ending'
+                        "Hour Ending"
                     ]
                 ),
             axis=1
@@ -2094,11 +2188,11 @@ with price_tab:
         market_mcpc_df = (
             market_mcpc_df[
                 market_mcpc_df[
-                    'Timestamp'
+                    "Timestamp"
                 ].notna()
             ]
             .sort_values(
-                'Timestamp'
+                "Timestamp"
             )
             .reset_index(
                 drop=True
@@ -2114,13 +2208,13 @@ with price_tab:
     if market_rt_df.empty:
 
         st.error(
-            'ERCOT Real-Time SPP could '
-            'not be loaded. '
+            "ERCOT Real-Time SPP could "
+            "not be loaded. "
             + (
                 rt_error
                 or
-                'The public report returned '
-                'no usable rows.'
+                "The public report returned "
+                "no usable rows."
             )
         )
 
@@ -2133,34 +2227,35 @@ with price_tab:
 
         latest_rt_timestamp = (
             latest_rt_row[
-                'Timestamp'
+                "Timestamp"
             ]
         )
 
         current_operating_day = (
             latest_rt_row[
-                'Oper Day'
+                "Oper Day"
             ]
         )
 
         st.success(
-            'ERCOT Real-Time SPP feed connected. '
-            'Latest settlement interval: '
+            "ERCOT Real-Time SPP feed connected. "
+            "Latest settlement interval: "
             f"{latest_rt_timestamp.strftime('%m/%d/%Y %H:%M')} "
-            'CT.'
+            "CT."
         )
 
         major_hubs = [
-            'HB_NORTH',
-            'HB_HOUSTON',
-            'HB_SOUTH',
-            'HB_WEST',
-            'HB_PAN'
+            "HB_NORTH",
+            "HB_HOUSTON",
+            "HB_SOUTH",
+            "HB_WEST",
+            "HB_PAN"
         ]
 
         major_hubs = [
             hub
-            for hub in major_hubs
+            for hub
+            in major_hubs
             if hub
             in market_rt_df.columns
         ]
@@ -2171,10 +2266,11 @@ with price_tab:
             in market_rt_df.columns
             if (
                 column.startswith(
-                    'HB_'
+                    "HB_"
                 )
-                or column.startswith(
-                    'LZ_'
+                or
+                column.startswith(
+                    "LZ_"
                 )
             )
         ]
@@ -2189,10 +2285,7 @@ with price_tab:
                 in market_dam_df.columns
             ]
 
-        (
-            point_col,
-            view_col
-        ) = st.columns(
+        point_col, view_col = st.columns(
             [
                 1.5,
                 1
@@ -2203,22 +2296,22 @@ with price_tab:
 
             default_point_index = (
                 market_points.index(
-                    'HB_NORTH'
+                    "HB_NORTH"
                 )
-                if 'HB_NORTH'
+                if "HB_NORTH"
                 in market_points
                 else 0
             )
 
             selected_market_point = (
                 st.selectbox(
-                    'Hub / Load Zone',
+                    "Hub / Load Zone",
                     options=
                         market_points,
                     index=
                         default_point_index,
                     key=
-                        'ercot_market_point'
+                        "ercot_market_point"
                 )
             )
 
@@ -2226,23 +2319,23 @@ with price_tab:
 
             chart_window = (
                 st.selectbox(
-                    'Chart View',
+                    "Chart View",
                     options=[
-                        'Today',
-                        'Last 24 Hours Available'
+                        "Today",
+                        "Last 24 Hours Available"
                     ],
                     index=0,
                     key=
-                        'ercot_market_chart_window'
+                        "ercot_market_chart_window"
                 )
             )
 
         selected_rt = (
             market_rt_df[
                 [
-                    'Timestamp',
-                    'Oper Day',
-                    'Interval Ending',
+                    "Timestamp",
+                    "Oper Day",
+                    "Interval Ending",
                     selected_market_point
                 ]
             ]
@@ -2257,12 +2350,12 @@ with price_tab:
             ]
         )
 
-        if chart_window == 'Today':
+        if chart_window == "Today":
 
             selected_rt = (
                 selected_rt[
                     selected_rt[
-                        'Oper Day'
+                        "Oper Day"
                     ]
                     == current_operating_day
                 ]
@@ -2316,7 +2409,7 @@ with price_tab:
 
         latest_interval = (
             latest_rt_row[
-                'Interval Ending'
+                "Interval Ending"
             ]
         )
 
@@ -2337,14 +2430,14 @@ with price_tab:
 
             dam_operating_day = (
                 market_dam_df[
-                    'Oper Day'
+                    "Oper Day"
                 ].max()
             )
 
             selected_dam = (
                 market_dam_df[
                     market_dam_df[
-                        'Oper Day'
+                        "Oper Day"
                     ]
                     == dam_operating_day
                 ]
@@ -2360,7 +2453,7 @@ with price_tab:
             matching_dam = (
                 selected_dam[
                     selected_dam[
-                        'Hour Ending Numeric'
+                        "Hour Ending Numeric"
                     ]
                     == latest_hour_ending
                 ]
@@ -2382,7 +2475,8 @@ with price_tab:
                 pd.notna(
                     latest_point_price
                 )
-                and pd.notna(
+                and
+                pd.notna(
                     dam_hour_price
                 )
             )
@@ -2396,7 +2490,7 @@ with price_tab:
             lmp_match = (
                 market_lmp_df[
                     market_lmp_df[
-                        'Settlement Point'
+                        "Settlement Point"
                     ]
                     == selected_market_point
                 ]
@@ -2406,38 +2500,31 @@ with price_tab:
 
                 latest_sced_lmp = (
                     lmp_match[
-                        'LMP'
+                        "LMP"
                     ]
                     .iloc[-1]
                 )
 
-        (
-            p1,
-            p2,
-            p3,
-            p4,
-            p5,
-            p6
-        ) = st.columns(
+        p1, p2, p3, p4, p5, p6 = st.columns(
             6
         )
 
         p1.metric(
-            'Latest SCED LMP',
+            "Latest SCED LMP",
             price_metric_value(
                 latest_sced_lmp
             )
         )
 
         p2.metric(
-            'Latest RT SPP',
+            "Latest RT SPP",
             price_metric_value(
                 latest_point_price
             )
         )
 
         p3.metric(
-            'RT Day Avg',
+            "RT Day Avg",
             price_metric_value(
                 rt_day_average
             )
@@ -2445,7 +2532,7 @@ with price_tab:
 
         p4.metric(
             (
-                'DAM HE '
+                "DAM HE "
                 + (
                     str(
                         int(
@@ -2455,7 +2542,7 @@ with price_tab:
                     if pd.notna(
                         latest_hour_ending
                     )
-                    else 'N/A'
+                    else "N/A"
                 )
             ),
             price_metric_value(
@@ -2464,30 +2551,31 @@ with price_tab:
         )
 
         p5.metric(
-            'RT - DAM',
+            "RT - DAM",
             (
-                f'${rt_minus_dam:+,.2f}/MWh'
+                f"${rt_minus_dam:+,.2f}/MWh"
                 if pd.notna(
                     rt_minus_dam
                 )
-                else 'N/A'
+                else "N/A"
             )
         )
 
         p6.metric(
-            'RT Day Range',
+            "RT Day Range",
             (
-                f'${rt_day_low:,.2f} – '
-                f'${rt_day_high:,.2f}'
+                f"${rt_day_low:,.2f} – "
+                f"${rt_day_high:,.2f}"
                 if (
                     pd.notna(
                         rt_day_low
                     )
-                    and pd.notna(
+                    and
+                    pd.notna(
                         rt_day_high
                     )
                 )
-                else 'N/A'
+                else "N/A"
             )
         )
 
@@ -2497,32 +2585,32 @@ with price_tab:
         )
 
         st.caption(
-            f'Market signal for '
-            f'{selected_market_point}: '
-            f'**{signal}** | '
-            'Negative 15-minute intervals '
-            'in selected view: '
-            f'**{negative_intervals}** | '
-            'DAM daily average: '
-            f'**{price_metric_value(dam_day_average)}**'
+            f"Market signal for "
+            f"{selected_market_point}: "
+            f"**{signal}** | "
+            "Negative 15-minute intervals "
+            "in selected view: "
+            f"**{negative_intervals}** | "
+            "DAM daily average: "
+            f"**{price_metric_value(dam_day_average)}**"
         )
 
         st.markdown(
-            '### Current Hub Snapshot'
+            "### Current Hub Snapshot"
         )
 
         hub_rows = []
 
         latest_rt_oper_day = (
             latest_rt_row[
-                'Oper Day'
+                "Oper Day"
             ]
         )
 
         rt_today = (
             market_rt_df[
                 market_rt_df[
-                    'Oper Day'
+                    "Oper Day"
                 ]
                 == latest_rt_oper_day
             ]
@@ -2531,7 +2619,7 @@ with price_tab:
 
         latest_dam_day = (
             market_dam_df[
-                'Oper Day'
+                "Oper Day"
             ].max()
             if not market_dam_df.empty
             else pd.NaT
@@ -2540,7 +2628,7 @@ with price_tab:
         dam_today = (
             market_dam_df[
                 market_dam_df[
-                    'Oper Day'
+                    "Oper Day"
                 ]
                 == latest_dam_day
             ]
@@ -2595,7 +2683,7 @@ with price_tab:
                 hub_lmp_match = (
                     market_lmp_df[
                         market_lmp_df[
-                            'Settlement Point'
+                            "Settlement Point"
                         ]
                         == hub
                     ]
@@ -2605,35 +2693,35 @@ with price_tab:
 
                     hub_lmp = (
                         hub_lmp_match[
-                            'LMP'
+                            "LMP"
                         ]
                         .iloc[-1]
                     )
 
             hub_rows.append(
                 {
-                    'Hub':
+                    "Hub":
                         hub,
 
-                    'Latest SCED LMP':
+                    "Latest SCED LMP":
                         hub_lmp,
 
-                    'Latest RT SPP':
+                    "Latest RT SPP":
                         latest_value,
 
-                    'RT Day Avg':
+                    "RT Day Avg":
                         average_value,
 
-                    'RT Day High':
+                    "RT Day High":
                         high_value,
 
-                    'RT Day Low':
+                    "RT Day Low":
                         low_value,
 
-                    'DAM Day Avg':
+                    "DAM Day Avg":
                         hub_dam_avg,
 
-                    'Signal':
+                    "Signal":
                         market_price_signal(
                             latest_value,
                             average_value
@@ -2641,10 +2729,8 @@ with price_tab:
                 }
             )
 
-        hub_snapshot = (
-            pd.DataFrame(
-                hub_rows
-            )
+        hub_snapshot = pd.DataFrame(
+            hub_rows
         )
 
         st.dataframe(
@@ -2652,69 +2738,66 @@ with price_tab:
             use_container_width=True,
             hide_index=True,
             column_config={
-                'Latest SCED LMP':
+                "Latest SCED LMP":
                     st.column_config.NumberColumn(
-                        'Latest SCED LMP ($/MWh)',
-                        format='$%.2f'
+                        "Latest SCED LMP ($/MWh)",
+                        format="$%.2f"
                     ),
 
-                'Latest RT SPP':
+                "Latest RT SPP":
                     st.column_config.NumberColumn(
-                        'Latest RT SPP ($/MWh)',
-                        format='$%.2f'
+                        "Latest RT SPP ($/MWh)",
+                        format="$%.2f"
                     ),
 
-                'RT Day Avg':
+                "RT Day Avg":
                     st.column_config.NumberColumn(
-                        'RT Day Avg ($/MWh)',
-                        format='$%.2f'
+                        "RT Day Avg ($/MWh)",
+                        format="$%.2f"
                     ),
 
-                'RT Day High':
+                "RT Day High":
                     st.column_config.NumberColumn(
-                        'RT Day High ($/MWh)',
-                        format='$%.2f'
+                        "RT Day High ($/MWh)",
+                        format="$%.2f"
                     ),
 
-                'RT Day Low':
+                "RT Day Low":
                     st.column_config.NumberColumn(
-                        'RT Day Low ($/MWh)',
-                        format='$%.2f'
+                        "RT Day Low ($/MWh)",
+                        format="$%.2f"
                     ),
 
-                'DAM Day Avg':
+                "DAM Day Avg":
                     st.column_config.NumberColumn(
-                        'DAM Day Avg ($/MWh)',
-                        format='$%.2f'
+                        "DAM Day Avg ($/MWh)",
+                        format="$%.2f"
                     )
             }
         )
 
-        (
-            chart_left,
-            chart_right
-        ) = st.columns(
+        chart_left, chart_right = st.columns(
             2
         )
 
         with chart_left:
 
             st.markdown(
-                f'### Real-Time SPP — '
-                f'{selected_market_point}'
+                f"### Real-Time SPP — "
+                f"{selected_market_point}"
             )
 
             rt_chart = (
                 selected_rt[
                     [
-                        'Timestamp',
+                        "Timestamp",
                         selected_market_point
                     ]
                 ]
                 .rename(
                     columns={
                         selected_market_point:
-                            'RT SPP ($/MWh)'
+                            "RT SPP ($/MWh)"
                     }
                 )
             )
@@ -2722,15 +2805,15 @@ with price_tab:
             if rt_chart.empty:
 
                 st.info(
-                    'No Real-Time rows are '
-                    'available for this selection.'
+                    "No Real-Time rows are "
+                    "available for this selection."
                 )
 
             else:
 
                 st.line_chart(
                     rt_chart.set_index(
-                        'Timestamp'
+                        "Timestamp"
                     ),
                     use_container_width=True,
                     height=360
@@ -2739,8 +2822,8 @@ with price_tab:
         with chart_right:
 
             st.markdown(
-                f'### Day-Ahead SPP — '
-                f'{selected_market_point}'
+                f"### Day-Ahead SPP — "
+                f"{selected_market_point}"
             )
 
             if (
@@ -2750,26 +2833,26 @@ with price_tab:
             ):
 
                 st.info(
-                    'DAM SPP is currently unavailable.'
+                    "DAM SPP is currently unavailable."
                 )
 
             else:
 
                 dam_chart_day = (
                     market_dam_df[
-                        'Oper Day'
+                        "Oper Day"
                     ].max()
                 )
 
                 dam_chart = (
                     market_dam_df[
                         market_dam_df[
-                            'Oper Day'
+                            "Oper Day"
                         ]
                         == dam_chart_day
                     ][
                         [
-                            'Timestamp',
+                            "Timestamp",
                             selected_market_point
                         ]
                     ]
@@ -2780,27 +2863,27 @@ with price_tab:
                     dam_chart.rename(
                         columns={
                             selected_market_point:
-                                'DAM SPP ($/MWh)'
+                                "DAM SPP ($/MWh)"
                         }
                     )
                 )
 
                 st.line_chart(
                     dam_chart.set_index(
-                        'Timestamp'
+                        "Timestamp"
                     ),
                     use_container_width=True,
                     height=360
                 )
 
         with st.expander(
-            '📋 View Current Real-Time Price Intervals',
+            "📋 View Current Real-Time Price Intervals",
             expanded=False
         ):
 
             rt_table_columns = [
-                'Oper Day',
-                'Interval Ending',
+                "Oper Day",
+                "Interval Ending",
                 *major_hubs
             ]
 
@@ -2828,10 +2911,10 @@ with price_tab:
     ):
 
         st.caption(
-            'Latest SCED LMP display could '
-            'not be loaded; the RT SPP and '
-            'DAM sections can still operate. '
-            f'{lmp_error}'
+            "Latest SCED LMP display could "
+            "not be loaded; the RT SPP and "
+            "DAM sections can still operate. "
+            f"{lmp_error}"
         )
 
     if (
@@ -2840,45 +2923,45 @@ with price_tab:
     ):
 
         st.warning(
-            'DAM Settlement Point Prices '
-            'could not be loaded. '
-            f'{dam_error}'
+            "DAM Settlement Point Prices "
+            "could not be loaded. "
+            f"{dam_error}"
         )
 
     st.divider()
 
     st.markdown(
-        '## 🔋 DAM Ancillary Service Prices'
+        "## 🔋 DAM Ancillary Service Prices"
     )
 
     st.caption(
-        'Day-Ahead Market Clearing Price '
-        'for Capacity (MCPC) for Non-Spin, '
-        'Regulation Down, Regulation Up, '
-        'RRS and ECRS.'
+        "Day-Ahead Market Clearing Price "
+        "for Capacity (MCPC) for Non-Spin, "
+        "Regulation Down, Regulation Up, "
+        "RRS and ECRS."
     )
 
     if market_mcpc_df.empty:
 
         st.info(
-            'Current DAM ancillary-service '
-            'clearing prices are not available '
-            'from the public report right now. '
+            "Current DAM ancillary-service "
+            "clearing prices are not available "
+            "from the public report right now. "
             + (
                 mcpc_error
                 if mcpc_error
-                else ''
+                else ""
             )
         )
 
     else:
 
         ancillary_columns = [
-            'NON-SPIN',
-            'REG-DOWN',
-            'REG-UP',
-            'RRS',
-            'ECRS'
+            "NON-SPIN",
+            "REG-DOWN",
+            "REG-UP",
+            "RRS",
+            "ECRS"
         ]
 
         ancillary_columns = [
@@ -2891,14 +2974,14 @@ with price_tab:
 
         latest_mcpc_day = (
             market_mcpc_df[
-                'Oper Day'
+                "Oper Day"
             ].max()
         )
 
         mcpc_today = (
             market_mcpc_df[
                 market_mcpc_df[
-                    'Oper Day'
+                    "Oper Day"
                 ]
                 == latest_mcpc_day
             ]
@@ -2911,26 +2994,26 @@ with price_tab:
 
             ancillary_summary_rows.append(
                 {
-                    'Service':
+                    "Service":
                         service,
 
-                    'Daily Average':
+                    "Daily Average":
                         mcpc_today[
                             service
                         ].mean(),
 
-                    'Daily Peak':
+                    "Daily Peak":
                         mcpc_today[
                             service
                         ].max(),
 
-                    'Peak Hour Ending':
+                    "Peak Hour Ending":
                         (
                             mcpc_today.loc[
                                 mcpc_today[
                                     service
                                 ].idxmax(),
-                                'Hour Ending'
+                                "Hour Ending"
                             ]
                             if mcpc_today[
                                 service
@@ -2940,10 +3023,8 @@ with price_tab:
                 }
             )
 
-        ancillary_summary = (
-            pd.DataFrame(
-                ancillary_summary_rows
-            )
+        ancillary_summary = pd.DataFrame(
+            ancillary_summary_rows
         )
 
         st.dataframe(
@@ -2951,72 +3032,72 @@ with price_tab:
             use_container_width=True,
             hide_index=True,
             column_config={
-                'Daily Average':
+                "Daily Average":
                     st.column_config.NumberColumn(
-                        'Daily Average ($/MW-h)',
-                        format='$%.2f'
+                        "Daily Average ($/MW-h)",
+                        format="$%.2f"
                     ),
 
-                'Daily Peak':
+                "Daily Peak":
                     st.column_config.NumberColumn(
-                        'Daily Peak ($/MW-h)',
-                        format='$%.2f'
+                        "Daily Peak ($/MW-h)",
+                        format="$%.2f"
                     )
             }
         )
 
         selected_ancillary = (
             st.selectbox(
-                'Ancillary Service',
+                "Ancillary Service",
                 options=
                     ancillary_columns,
                 index=
                     (
                         ancillary_columns.index(
-                            'ECRS'
+                            "ECRS"
                         )
-                        if 'ECRS'
+                        if "ECRS"
                         in ancillary_columns
                         else 0
                     ),
                 key=
-                    'ercot_ancillary_service'
+                    "ercot_ancillary_service"
             )
         )
 
         mcpc_chart = (
             mcpc_today[
                 [
-                    'Timestamp',
+                    "Timestamp",
                     selected_ancillary
                 ]
             ]
             .rename(
                 columns={
                     selected_ancillary:
-                        f'{selected_ancillary} MCPC'
+                        f"{selected_ancillary} MCPC"
                 }
             )
         )
 
         st.line_chart(
             mcpc_chart.set_index(
-                'Timestamp'
+                "Timestamp"
             ),
             use_container_width=True,
             height=320
         )
 
         with st.expander(
-            '📋 View DAM Ancillary Hourly Prices',
+            "📋 View DAM Ancillary Hourly Prices",
             expanded=False
         ):
 
             st.dataframe(
                 mcpc_today[
                     [
-                        'Oper Day',
-                        'Hour Ending',
+                        "Oper Day",
+                        "Hour Ending",
                         *ancillary_columns
                     ]
                 ],
@@ -3027,41 +3108,41 @@ with price_tab:
     st.divider()
 
     st.markdown(
-        '### ERCOT Sources'
+        "### ERCOT Sources"
     )
 
     st.markdown(
-        f'- [Latest SCED LMPs for Load Zones '
-        f'and Trading Hubs]'
-        f'({ERCOT_LATEST_LMP_URL})  \n'
-        f'- [Real-Time Settlement Point Prices]'
-        f'({ERCOT_RT_SPP_URL})  \n'
-        f'- [Day-Ahead Settlement Point Prices]'
-        f'({ERCOT_DAM_SPP_URL})  \n'
-        f'- [DAM Clearing Prices for Capacity]'
-        f'({ERCOT_DAM_MCPC_URL})'
+        f"- [Latest SCED LMPs for Load Zones "
+        f"and Trading Hubs]"
+        f"({ERCOT_LATEST_LMP_URL})  \n"
+        f"- [Real-Time Settlement Point Prices]"
+        f"({ERCOT_RT_SPP_URL})  \n"
+        f"- [Day-Ahead Settlement Point Prices]"
+        f"({ERCOT_DAM_SPP_URL})  \n"
+        f"- [DAM Clearing Prices for Capacity]"
+        f"({ERCOT_DAM_MCPC_URL})"
     )
 
     st.caption(
-        'ERCOT broad hub and load-zone prices '
-        'are useful market benchmarks, but an '
+        "ERCOT broad hub and load-zone prices "
+        "are useful market benchmarks, but an "
         "individual generation project's realized "
-        'price can differ materially because of '
-        'nodal basis, congestion, curtailment and '
-        'project-specific settlement mechanics.'
+        "price can differ materially because of "
+        "nodal basis, congestion, curtailment and "
+        "project-specific settlement mechanics."
     )
 
 
+# ============================================================
+# DASHBOARD GUIDE
+# ============================================================
 with dashboard_tab:
 
     st.markdown(
-        '## 📘 Dashboard Guide'
+        "## 📘 Dashboard Guide"
     )
 
-    (
-        guide_left,
-        guide_right
-    ) = st.columns(
+    guide_left, guide_right = st.columns(
         [
             1.55,
             1
@@ -3071,50 +3152,48 @@ with dashboard_tab:
     with guide_left:
 
         st.markdown(
-            '### 🎯 Opportunity Score'
+            "### 🎯 Opportunity Score"
         )
 
         st.caption(
-            'Projects are scored from 0–100 '
-            'to prioritize attractive and '
-            'actionable acquisition opportunities.'
+            "Projects are scored from 0–100 "
+            "to prioritize attractive and "
+            "actionable acquisition opportunities."
         )
 
-        scoring_methodology = (
-            pd.DataFrame(
-                {
-                    'Factor': [
-                        'Seller Motivation',
-                        'Development Stage',
-                        'Market / Revenue',
-                        'Acquisition Value',
-                        'Executability'
-                    ],
+        scoring_methodology = pd.DataFrame(
+            {
+                "Factor": [
+                    "Seller Motivation",
+                    "Development Stage",
+                    "Market / Revenue",
+                    "Acquisition Value",
+                    "Executability"
+                ],
 
-                    'Weight': [
-                        f'{distress_weight:.0%}',
-                        f'{development_weight:.0%}',
-                        f'{market_weight:.0%}',
-                        f'{value_weight:.0%}',
-                        f'{exec_weight:.0%}'
-                    ],
+                "Weight": [
+                    f"{distress_weight:.0%}",
+                    f"{development_weight:.0%}",
+                    f"{market_weight:.0%}",
+                    f"{value_weight:.0%}",
+                    f"{exec_weight:.0%}"
+                ],
 
-                    'What It Measures': [
-                        'Likelihood owner is motivated '
-                        'to transact',
+                "What It Measures": [
+                    "Likelihood owner is motivated "
+                    "to transact",
 
-                        'Project maturity and progress '
-                        'through development',
+                    "Project maturity and progress "
+                    "through development",
 
-                        'Revenue visibility + ERCOT location',
+                    "Revenue visibility + ERCOT location",
 
-                        'Tax-credit / siting attributes',
+                    "Tax-credit / siting attributes",
 
-                        'Ability to realistically '
-                        'execute a transaction'
-                    ]
-                }
-            )
+                    "Ability to realistically "
+                    "execute a transaction"
+                ]
+            }
         )
 
         st.dataframe(
@@ -3124,7 +3203,7 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '#### Formula'
+            "#### Formula"
         )
 
         st.markdown(
@@ -3139,21 +3218,21 @@ with dashboard_tab:
         )
 
         st.caption(
-            f'Market / Revenue = '
-            f'Revenue Visibility × '
-            f'{revenue_visibility_weight:.0%} '
-            f'+ ERCOT Location × '
-            f'{location_market_weight:.0%}.'
+            f"Market / Revenue = "
+            f"Revenue Visibility × "
+            f"{revenue_visibility_weight:.0%} "
+            f"+ ERCOT Location × "
+            f"{location_market_weight:.0%}."
         )
 
         st.caption(
-            f'Executability = '
-            f'Seller Actionability × '
-            f'{actionability_weight:.0%} '
-            f'+ Timing × '
-            f'{timing_exec_weight:.0%} '
-            f'+ Development Stage × '
-            f'{development_exec_weight:.0%}.'
+            f"Executability = "
+            f"Seller Actionability × "
+            f"{actionability_weight:.0%} "
+            f"+ Timing × "
+            f"{timing_exec_weight:.0%} "
+            f"+ Development Stage × "
+            f"{development_exec_weight:.0%}."
         )
 
         example_seller = (
@@ -3220,51 +3299,49 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '#### Example'
+            "#### Example"
         )
 
-        example_background = (
-            pd.DataFrame(
-                {
-                    'Factor': [
-                        'Seller Motivation',
-                        'Development Stage',
-                        'Market / Revenue',
-                        'Acquisition Value',
-                        'Executability'
-                    ],
+        example_background = pd.DataFrame(
+            {
+                "Factor": [
+                    "Seller Motivation",
+                    "Development Stage",
+                    "Market / Revenue",
+                    "Acquisition Value",
+                    "Executability"
+                ],
 
-                    'Score': [
-                        example_seller,
-                        example_development,
-                        example_market,
-                        example_value,
-                        example_executability
-                    ],
+                "Score": [
+                    example_seller,
+                    example_development,
+                    example_market,
+                    example_value,
+                    example_executability
+                ],
 
-                    'Why': [
-                        'Discount Potential 4 = 80; '
-                        'High Confidence = 100%; '
-                        '80 × 100% = 80',
+                "Why": [
+                    "Discount Potential 4 = 80; "
+                    "High Confidence = 100%; "
+                    "80 × 100% = 80",
 
-                        'Operating project = 100',
+                    "Operating project = 100",
 
-                        f'Revenue visibility = '
-                        f'{example_revenue:.0f}; '
-                        f'ERCOT-N = '
-                        f'{example_location:.0f}',
+                    f"Revenue visibility = "
+                    f"{example_revenue:.0f}; "
+                    f"ERCOT-N = "
+                    f"{example_location:.0f}",
 
-                        'Tax Credit only = 70',
+                    "Tax Credit only = 70",
 
-                        f'Actionability 100 × '
-                        f'{actionability_weight:.0%} '
-                        f'+ Timing 100 × '
-                        f'{timing_exec_weight:.0%} '
-                        f'+ Development Stage 100 × '
-                        f'{development_exec_weight:.0%}'
-                    ]
-                }
-            )
+                    f"Actionability 100 × "
+                    f"{actionability_weight:.0%} "
+                    f"+ Timing 100 × "
+                    f"{timing_exec_weight:.0%} "
+                    f"+ Development Stage 100 × "
+                    f"{development_exec_weight:.0%}"
+                ]
+            }
         )
 
         st.dataframe(
@@ -3274,14 +3351,14 @@ with dashboard_tab:
         )
 
         st.success(
-            f'Example Opportunity Score = '
-            f'{example_final:.1f}'
+            f"Example Opportunity Score = "
+            f"{example_final:.1f}"
         )
 
     with guide_right:
 
         st.markdown(
-            '### 🧭 How to Use'
+            "### 🧭 How to Use"
         )
 
         st.markdown(
@@ -3293,13 +3370,13 @@ with dashboard_tab:
             **5. Bundles** — Multiple 50–60 MW assets by owner  
             **6. Score Breakdown** — Drill into a project  
             **7. Map Explorer** — View all mapped projects, filter the universe, and drill into a selected project  
-            **8. ERCOT Competitor Due Diligence** — Screen Project Orbit competitors in ERCOT South, map them, and download the list  
+            **8. ERCOT Competitor Due Diligence** — Screen Project Orbit competitors in ERCOT South, filter by county and any MW range, compare queue placement, map projects, and download the list  
             **9. ERCOT Market Prices** — Monitor live RT SPP, DAM prices, ancillary-service clearing prices, and project-area benchmarks
             """
         )
 
         st.markdown(
-            '### 🚦 Score Guide'
+            "### 🚦 Score Guide"
         )
 
         st.markdown(
@@ -3312,29 +3389,27 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '### 🗺️ Location Logic'
+            "### 🗺️ Location Logic"
         )
 
-        location_guide = (
-            pd.DataFrame(
-                {
-                    'Area': [
-                        'ERCOT-N',
-                        'ERCOT-H',
-                        'ERCOT-S',
-                        'ERCOT-W',
-                        'Panhandle'
-                    ],
+        location_guide = pd.DataFrame(
+            {
+                "Area": [
+                    "ERCOT-N",
+                    "ERCOT-H",
+                    "ERCOT-S",
+                    "ERCOT-W",
+                    "Panhandle"
+                ],
 
-                    'Score': [
-                        location_north,
-                        location_houston,
-                        location_south,
-                        location_west,
-                        location_panhandle
-                    ]
-                }
-            )
+                "Score": [
+                    location_north,
+                    location_houston,
+                    location_south,
+                    location_west,
+                    location_panhandle
+                ]
+            }
         )
 
         st.dataframe(
@@ -3344,41 +3419,41 @@ with dashboard_tab:
         )
 
         st.caption(
-            'Location is a broad screening proxy. '
-            'Node-level congestion, basis, curtailment '
-            'and market fundamentals can materially '
-            'differ within each area.'
+            "Location is a broad screening proxy. "
+            "Node-level congestion, basis, curtailment "
+            "and market fundamentals can materially "
+            "differ within each area."
         )
 
     with st.expander(
-        '📐 View Full Score Logic',
+        "📐 View Full Score Logic",
         expanded=False
     ):
 
         st.markdown(
-            '#### Seller Motivation'
+            "#### Seller Motivation"
         )
 
         st.caption(
-            'Measures the strength of the '
-            'seller-side reason to transact. '
-            'The base motivation score is '
-            'adjusted for confidence.'
+            "Measures the strength of the "
+            "seller-side reason to transact. "
+            "The base motivation score is "
+            "adjusted for confidence."
         )
 
         st.dataframe(
             pd.DataFrame(
                 {
-                    'Discount Potential': [
-                        '5 – Very High',
-                        '4 – High',
-                        '3 – Moderate',
-                        '2 – Low',
-                        '1 – Very Low',
-                        'No Signal'
+                    "Discount Potential": [
+                        "5 – Very High",
+                        "4 – High",
+                        "3 – Moderate",
+                        "2 – Low",
+                        "1 – Very Low",
+                        "No Signal"
                     ],
 
-                    'Base Score': [
+                    "Base Score": [
                         distress_5,
                         distress_4,
                         distress_3,
@@ -3395,16 +3470,16 @@ with dashboard_tab:
         st.dataframe(
             pd.DataFrame(
                 {
-                    'Confidence': [
-                        'High',
-                        'Medium',
-                        'Low'
+                    "Confidence": [
+                        "High",
+                        "Medium",
+                        "Low"
                     ],
 
-                    'Multiplier': [
-                        f'{confidence_high:.0%}',
-                        f'{confidence_medium:.0%}',
-                        f'{confidence_low:.0%}'
+                    "Multiplier": [
+                        f"{confidence_high:.0%}",
+                        f"{confidence_medium:.0%}",
+                        f"{confidence_low:.0%}"
                     ]
                 }
             ),
@@ -3413,25 +3488,25 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '#### Development Stage'
+            "#### Development Stage"
         )
 
         st.dataframe(
             pd.DataFrame(
                 {
-                    'Stage': [
-                        'Operating / Construction Complete',
-                        '>50% Construction',
-                        'In Construction',
-                        'IA Executed',
-                        'FIS Completed',
-                        'FIS Started',
-                        'Studies Undergoing / Other',
-                        'Pre-Study',
-                        'Inactive / Suspended / Retired'
+                    "Stage": [
+                        "Operating / Construction Complete",
+                        ">50% Construction",
+                        "In Construction",
+                        "IA Executed",
+                        "FIS Completed",
+                        "FIS Started",
+                        "Studies Undergoing / Other",
+                        "Pre-Study",
+                        "Inactive / Suspended / Retired"
                     ],
 
-                    'Score': [
+                    "Score": [
                         development_operating,
                         development_50,
                         development_construction,
@@ -3449,27 +3524,28 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '#### Market / Revenue'
+            "#### Market / Revenue"
         )
 
         st.caption(
-            f'Market / Revenue = Revenue Visibility × '
-            f'{revenue_visibility_weight:.0%} '
-            f'+ ERCOT Location × '
-            f'{location_market_weight:.0%}.'
+            f"Market / Revenue = "
+            f"Revenue Visibility × "
+            f"{revenue_visibility_weight:.0%} "
+            f"+ ERCOT Location × "
+            f"{location_market_weight:.0%}."
         )
 
         st.dataframe(
             pd.DataFrame(
                 {
-                    'Revenue Visibility': [
-                        'Contract + Named Offtaker',
-                        'Named Offtaker Only',
-                        'Contract Only',
-                        'Neither'
+                    "Revenue Visibility": [
+                        "Contract + Named Offtaker",
+                        "Named Offtaker Only",
+                        "Contract Only",
+                        "Neither"
                     ],
 
-                    'Score': [
+                    "Score": [
                         market_both,
                         market_offtaker,
                         market_contract,
@@ -3484,16 +3560,16 @@ with dashboard_tab:
         st.dataframe(
             pd.DataFrame(
                 {
-                    'ERCOT Area': [
-                        'ERCOT-N',
-                        'ERCOT-H',
-                        'ERCOT-S',
-                        'ERCOT-W',
-                        'Panhandle',
-                        'Unknown / Other'
+                    "ERCOT Area": [
+                        "ERCOT-N",
+                        "ERCOT-H",
+                        "ERCOT-S",
+                        "ERCOT-W",
+                        "Panhandle",
+                        "Unknown / Other"
                     ],
 
-                    'Location Score': [
+                    "Location Score": [
                         location_north,
                         location_houston,
                         location_south,
@@ -3508,20 +3584,20 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '#### Acquisition Value'
+            "#### Acquisition Value"
         )
 
         st.dataframe(
             pd.DataFrame(
                 {
-                    'Attributes': [
-                        'Tax Credit + Energy Community',
-                        'Tax Credit Only',
-                        'Energy Community Only',
-                        'Neither'
+                    "Attributes": [
+                        "Tax Credit + Energy Community",
+                        "Tax Credit Only",
+                        "Energy Community Only",
+                        "Neither"
                     ],
 
-                    'Score': [
+                    "Score": [
                         value_both,
                         value_tax,
                         value_ec,
@@ -3534,71 +3610,71 @@ with dashboard_tab:
         )
 
         st.caption(
-            'Domestic Content is not included in '
-            'the automated score because Orennia '
-            'does not currently expose project-level '
-            'Domestic Content qualification or bonus '
-            'fields. Equipment information can be '
-            'used as a diligence reference but is '
-            'not treated as evidence of qualification.'
+            "Domestic Content is not included in "
+            "the automated score because Orennia "
+            "does not currently expose project-level "
+            "Domestic Content qualification or bonus "
+            "fields. Equipment information can be "
+            "used as a diligence reference but is "
+            "not treated as evidence of qualification."
         )
 
         st.markdown(
-            '#### Executability'
+            "#### Executability"
         )
 
         st.caption(
-            f'Executability = Seller Actionability × '
-            f'{actionability_weight:.0%} '
-            f'+ Timing × '
-            f'{timing_exec_weight:.0%} '
-            f'+ Development Stage × '
-            f'{development_exec_weight:.0%}.'
+            f"Executability = Seller Actionability × "
+            f"{actionability_weight:.0%} "
+            f"+ Timing × "
+            f"{timing_exec_weight:.0%} "
+            f"+ Development Stage × "
+            f"{development_exec_weight:.0%}."
         )
 
     st.caption(
-        f'ERCOT Location represents '
-        f'{location_market_weight * market_weight:.1%} '
-        'of the total Opportunity Score '
-        'under the current assumptions.'
+        f"ERCOT Location represents "
+        f"{location_market_weight * market_weight:.1%} "
+        "of the total Opportunity Score "
+        "under the current assumptions."
     )
 
     st.caption(
-        'Screening tool only — rankings prioritize '
-        'sourcing and diligence activity and are not '
-        'a substitute for full investment underwriting.'
+        "Screening tool only — rankings prioritize "
+        "sourcing and diligence activity and are not "
+        "a substitute for full investment underwriting."
     )
 
     st.divider()
 
     st.subheader(
-        'Seller Motivation / Actionability Assumptions'
+        "Seller Motivation / Actionability Assumptions"
     )
 
     st.caption(
-        'These assumptions drive the project rankings. '
-        'Public seller intelligence below is informational '
-        'only and does not automatically change '
-        'project scores.'
+        "These assumptions drive the project rankings. "
+        "Public seller intelligence below is informational "
+        "only and does not automatically change "
+        "project scores."
     )
 
     current_sellers = (
         st.session_state[
-            'seller_assumptions'
+            "seller_assumptions"
         ].copy()
     )
 
     current_sellers.insert(
         2,
-        'Discount Score',
+        "Discount Score",
         current_sellers.apply(
             lambda row:
                 calculate_discount_score(
                     row[
-                        'Discount Potential'
+                        "Discount Potential"
                     ],
                     row[
-                        'Confidence'
+                        "Confidence"
                     ]
                 ),
             axis=1
@@ -3607,88 +3683,85 @@ with dashboard_tab:
 
     current_sellers.insert(
         4,
-        'Actionability Score',
+        "Actionability Score",
         current_sellers[
-            'Seller Actionability'
+            "Seller Actionability"
         ].apply(
             actionability_score
         )
     )
 
-    edited_sellers_full = (
-        st.data_editor(
-            current_sellers,
-            use_container_width=True,
-            hide_index=True,
-            num_rows='dynamic',
-            key=
-                'seller_assumptions_editor',
-            disabled=[
-                'Discount Score',
-                'Actionability Score'
-            ],
-            column_order=[
-                'Owner',
-                'Discount Potential',
-                'Discount Score',
-                'Seller Actionability',
-                'Actionability Score',
-                'Confidence'
-            ],
-            column_config={
-                'Discount Potential':
-                    st.column_config.NumberColumn(
-                        'Discount Potential',
-                        min_value=1,
-                        max_value=5,
-                        step=1,
-                        format='%d'
-                    ),
+    edited_sellers_full = st.data_editor(
+        current_sellers,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="seller_assumptions_editor",
+        disabled=[
+            "Discount Score",
+            "Actionability Score"
+        ],
+        column_order=[
+            "Owner",
+            "Discount Potential",
+            "Discount Score",
+            "Seller Actionability",
+            "Actionability Score",
+            "Confidence"
+        ],
+        column_config={
+            "Discount Potential":
+                st.column_config.NumberColumn(
+                    "Discount Potential",
+                    min_value=1,
+                    max_value=5,
+                    step=1,
+                    format="%d"
+                ),
 
-                'Discount Score':
-                    st.column_config.ProgressColumn(
-                        'Discount Score',
-                        min_value=0,
-                        max_value=100,
-                        format='%.0f'
-                    ),
+            "Discount Score":
+                st.column_config.ProgressColumn(
+                    "Discount Score",
+                    min_value=0,
+                    max_value=100,
+                    format="%.0f"
+                ),
 
-                'Seller Actionability':
-                    st.column_config.NumberColumn(
-                        'Seller Actionability',
-                        min_value=1,
-                        max_value=5,
-                        step=1,
-                        format='%d'
-                    ),
+            "Seller Actionability":
+                st.column_config.NumberColumn(
+                    "Seller Actionability",
+                    min_value=1,
+                    max_value=5,
+                    step=1,
+                    format="%d"
+                ),
 
-                'Actionability Score':
-                    st.column_config.ProgressColumn(
-                        'Actionability Score',
-                        min_value=0,
-                        max_value=100,
-                        format='%.0f'
-                    ),
+            "Actionability Score":
+                st.column_config.ProgressColumn(
+                    "Actionability Score",
+                    min_value=0,
+                    max_value=100,
+                    format="%.0f"
+                ),
 
-                'Confidence':
-                    st.column_config.SelectboxColumn(
-                        'Confidence',
-                        options=[
-                            'High',
-                            'Medium',
-                            'Low'
-                        ]
-                    )
-            }
-        )
+            "Confidence":
+                st.column_config.SelectboxColumn(
+                    "Confidence",
+                    options=[
+                        "High",
+                        "Medium",
+                        "Low"
+                    ]
+                )
+        }
     )
 
 
 editable_seller_columns = [
-    'Owner',
-    'Discount Potential',
-    'Seller Actionability',
-    'Confidence'
+    "Owner",
+    "Discount Potential",
+    "Seller Actionability",
+    "Confidence"
 ]
 
 
@@ -3701,7 +3774,7 @@ new_seller_assumptions = (
 
 old_seller_assumptions = (
     st.session_state[
-        'seller_assumptions'
+        "seller_assumptions"
     ][
         editable_seller_columns
     ].copy()
@@ -3713,7 +3786,7 @@ if not new_seller_assumptions.equals(
 ):
 
     st.session_state[
-        'seller_assumptions'
+        "seller_assumptions"
     ] = new_seller_assumptions
 
     st.rerun()
@@ -3721,16 +3794,16 @@ if not new_seller_assumptions.equals(
 
 edited_sellers = (
     st.session_state[
-        'seller_assumptions'
+        "seller_assumptions"
     ].copy()
 )
 
 
 edited_sellers[
-    'Owner Key'
+    "Owner Key"
 ] = (
     edited_sellers[
-        'Owner'
+        "Owner"
     ]
     .astype(
         str
@@ -3743,50 +3816,53 @@ edited_sellers[
 seller_lookup = (
     edited_sellers
     .set_index(
-        'Owner Key'
+        "Owner Key"
     )
     .to_dict(
-        'index'
+        "index"
     )
 )
 
 
+# ============================================================
+# PUBLIC SELLER INTELLIGENCE
+# ============================================================
 SELLER_SEARCH_TERMS = {
-    'Birch Creek Energy':
-        'Birch Creek Energy',
+    "Birch Creek Energy":
+        "Birch Creek Energy",
 
-    'Birch Creek Development':
-        'Birch Creek Energy',
+    "Birch Creek Development":
+        "Birch Creek Energy",
 
-    'esVolta':
-        'esVolta',
+    "esVolta":
+        "esVolta",
 
-    'Key Capture Energy':
-        'Key Capture Energy',
+    "Key Capture Energy":
+        "Key Capture Energy",
 
-    'Lightsource BP':
-        'Lightsource bp',
+    "Lightsource BP":
+        "Lightsource bp",
 
-    'Ørsted U.S. Onshore':
-        'Orsted U.S. Onshore',
+    "Ørsted U.S. Onshore":
+        "Orsted U.S. Onshore",
 
-    'Orsted':
-        'Orsted U.S. renewables',
+    "Orsted":
+        "Orsted U.S. renewables",
 
-    'Flatiron Energy':
-        'Flatiron Energy',
+    "Flatiron Energy":
+        "Flatiron Energy",
 
-    'Recurrent Energy':
-        'Recurrent Energy',
+    "Recurrent Energy":
+        "Recurrent Energy",
 
-    'EDF power solutions North America':
-        'EDF power solutions North America',
+    "EDF power solutions North America":
+        "EDF power solutions North America",
 
-    'EDF Renewables':
-        'EDF Renewables North America',
+    "EDF Renewables":
+        "EDF Renewables North America",
 
-    'Greenbacker Renewable Energy Company':
-        'Greenbacker Renewable Energy Company'
+    "Greenbacker Renewable Energy Company":
+        "Greenbacker Renewable Energy Company"
 }
 
 
@@ -3796,18 +3872,18 @@ SELLER_SIGNAL_TERMS = (
     '"asset sale" OR '
     '"portfolio sale" OR '
     '"sale process" OR '
-    'divest OR '
-    'divestiture OR '
+    "divest OR "
+    "divestiture OR "
     '"capital recycling" OR '
-    'monetization OR '
+    "monetization OR "
     '"sell-down" OR '
     '"stake sale" OR '
-    'bankruptcy OR '
-    'restructuring OR '
-    'default OR '
-    'distress OR '
-    'liquidity OR '
-    'layoffs OR '
+    "bankruptcy OR "
+    "restructuring OR "
+    "default OR "
+    "distress OR "
+    "liquidity OR "
+    "layoffs OR "
     '"job cuts" OR '
     '"project cancellation"'
 )
@@ -3823,8 +3899,8 @@ def fetch_company_news(
 
     query = (
         f'"{search_term}" '
-        f'({SELLER_SIGNAL_TERMS}) '
-        f'when:{SELLER_LOOKBACK_DAYS}d'
+        f"({SELLER_SIGNAL_TERMS}) "
+        f"when:{SELLER_LOOKBACK_DAYS}d"
     )
 
     encoded_query = (
@@ -3834,20 +3910,20 @@ def fetch_company_news(
     )
 
     url = (
-        'https://news.google.com/'
-        'rss/search?'
-        f'q={encoded_query}'
-        '&hl=en-US'
-        '&gl=US'
-        '&ceid=US:en'
+        "https://news.google.com/"
+        "rss/search?"
+        f"q={encoded_query}"
+        "&hl=en-US"
+        "&gl=US"
+        "&ceid=US:en"
     )
 
     request = urllib.request.Request(
         url,
         headers={
-            'User-Agent':
-                'Mozilla/5.0 '
-                'ERCOT-Acquisition-Dashboard'
+            "User-Agent":
+                "Mozilla/5.0 "
+                "ERCOT-Acquisition-Dashboard"
         }
     )
 
@@ -3860,43 +3936,45 @@ def fetch_company_news(
             timeout=10
         ) as response:
 
-            xml_data = response.read()
+            xml_data = (
+                response.read()
+            )
 
         root = ET.fromstring(
             xml_data
         )
 
         for item in root.findall(
-            './/item'
+            ".//item"
         ):
 
             title = clean_text(
                 item.findtext(
-                    'title'
+                    "title"
                 )
             )
 
             description = strip_html(
                 item.findtext(
-                    'description'
+                    "description"
                 )
             )
 
             source = clean_text(
                 item.findtext(
-                    'source'
+                    "source"
                 )
             )
 
             link = clean_text(
                 item.findtext(
-                    'link'
+                    "link"
                 )
             )
 
             published_raw = clean_text(
                 item.findtext(
-                    'pubDate'
+                    "pubDate"
                 )
             )
 
@@ -3932,19 +4010,19 @@ def fetch_company_news(
 
             articles.append(
                 {
-                    'Title':
+                    "Title":
                         title,
 
-                    'Description':
+                    "Description":
                         description,
 
-                    'Source':
+                    "Source":
                         source,
 
-                    'Published':
+                    "Published":
                         published,
 
-                    'URL':
+                    "URL":
                         link
                 }
             )
@@ -3958,103 +4036,103 @@ def fetch_company_news(
 
 SELLER_SIGNAL_RULES = [
     {
-        'Signal Type':
-            'Formal Sale / Strategic Review',
+        "Signal Type":
+            "Formal Sale / Strategic Review",
 
-        'Keywords': [
-            'strategic review',
-            'strategic alternatives',
-            'sale process',
-            'portfolio sale',
-            'asset sale',
-            'exploring a sale',
-            'divestiture'
+        "Keywords": [
+            "strategic review",
+            "strategic alternatives",
+            "sale process",
+            "portfolio sale",
+            "asset sale",
+            "exploring a sale",
+            "divestiture"
         ],
 
-        'Suggested Motivation':
+        "Suggested Motivation":
             5,
 
-        'Suggested Actionability':
+        "Suggested Actionability":
             5
     },
 
     {
-        'Signal Type':
-            'Restructuring / Financial Stress',
+        "Signal Type":
+            "Restructuring / Financial Stress",
 
-        'Keywords': [
-            'bankruptcy',
-            'chapter 11',
-            'restructuring',
-            'default',
-            'distressed',
-            'liquidity crisis',
-            'going concern'
+        "Keywords": [
+            "bankruptcy",
+            "chapter 11",
+            "restructuring",
+            "default",
+            "distressed",
+            "liquidity crisis",
+            "going concern"
         ],
 
-        'Suggested Motivation':
+        "Suggested Motivation":
             5,
 
-        'Suggested Actionability':
+        "Suggested Actionability":
             4
     },
 
     {
-        'Signal Type':
-            'Capital Recycling / Monetization',
+        "Signal Type":
+            "Capital Recycling / Monetization",
 
-        'Keywords': [
-            'capital recycling',
-            'asset monetization',
-            'monetization',
-            'sell-down',
-            'sell down',
-            'stake sale'
+        "Keywords": [
+            "capital recycling",
+            "asset monetization",
+            "monetization",
+            "sell-down",
+            "sell down",
+            "stake sale"
         ],
 
-        'Suggested Motivation':
+        "Suggested Motivation":
             4,
 
-        'Suggested Actionability':
+        "Suggested Actionability":
             5
     },
 
     {
-        'Signal Type':
-            'Layoffs / Cost Reduction',
+        "Signal Type":
+            "Layoffs / Cost Reduction",
 
-        'Keywords': [
-            'layoffs',
-            'layoff',
-            'job cuts',
-            'workforce reduction',
-            'headcount reduction'
+        "Keywords": [
+            "layoffs",
+            "layoff",
+            "job cuts",
+            "workforce reduction",
+            "headcount reduction"
         ],
 
-        'Suggested Motivation':
+        "Suggested Motivation":
             4,
 
-        'Suggested Actionability':
+        "Suggested Actionability":
             3
     },
 
     {
-        'Signal Type':
-            'Project Cancellation / Portfolio Pressure',
+        "Signal Type":
+            "Project Cancellation / Portfolio Pressure",
 
-        'Keywords': [
-            'project cancellation',
-            'project cancellations',
-            'cancelled project',
-            'canceled project',
-            'project impairment',
-            'impairment charge'
+        "Keywords": [
+            "project cancellation",
+            "project cancellations",
+            "cancelled project",
+            "canceled project",
+            "project impairment",
+            "impairment charge"
         ],
 
-        'Suggested Motivation':
+        "Suggested Motivation":
             4,
 
-        'Suggested Actionability':
+        "Suggested Actionability":
             3
     }
 ]
@@ -4069,7 +4147,7 @@ def classify_article(
         clean_text(
             title
         )
-        + ' '
+        + " "
         + clean_text(
             description
         )
@@ -4078,7 +4156,7 @@ def classify_article(
     for rule in SELLER_SIGNAL_RULES:
 
         for keyword in rule[
-            'Keywords'
+            "Keywords"
         ]:
 
             if keyword.lower() in text:
@@ -4095,7 +4173,7 @@ def build_advisory_seller_intelligence():
     for _, seller in edited_sellers.iterrows():
 
         owner = seller[
-            'Owner'
+            "Owner"
         ]
 
         search_term = (
@@ -4115,10 +4193,10 @@ def build_advisory_seller_intelligence():
 
             rule = classify_article(
                 article.get(
-                    'Title'
+                    "Title"
                 ),
                 article.get(
-                    'Description'
+                    "Description"
                 )
             )
 
@@ -4130,19 +4208,19 @@ def build_advisory_seller_intelligence():
                 {
                     **article,
 
-                    'Signal Type':
+                    "Signal Type":
                         rule[
-                            'Signal Type'
+                            "Signal Type"
                         ],
 
-                    'Suggested Motivation':
+                    "Suggested Motivation":
                         rule[
-                            'Suggested Motivation'
+                            "Suggested Motivation"
                         ],
 
-                    'Suggested Actionability':
+                    "Suggested Actionability":
                         rule[
-                            'Suggested Actionability'
+                            "Suggested Actionability"
                         ]
                 }
             )
@@ -4154,7 +4232,7 @@ def build_advisory_seller_intelligence():
             ):
 
                 published = article.get(
-                    'Published'
+                    "Published"
                 )
 
                 if pd.isna(
@@ -4190,52 +4268,52 @@ def build_advisory_seller_intelligence():
 
             rows.append(
                 {
-                    'Owner':
+                    "Owner":
                         owner,
 
-                    'Current Motivation':
+                    "Current Motivation":
                         seller[
-                            'Discount Potential'
+                            "Discount Potential"
                         ],
 
-                    'Current Actionability':
+                    "Current Actionability":
                         seller[
-                            'Seller Actionability'
+                            "Seller Actionability"
                         ],
 
-                    'Suggested Motivation':
+                    "Suggested Motivation":
                         latest[
-                            'Suggested Motivation'
+                            "Suggested Motivation"
                         ],
 
-                    'Suggested Actionability':
+                    "Suggested Actionability":
                         latest[
-                            'Suggested Actionability'
+                            "Suggested Actionability"
                         ],
 
-                    'Signal Type':
+                    "Signal Type":
                         latest[
-                            'Signal Type'
+                            "Signal Type"
                         ],
 
-                    'Signal Date':
+                    "Signal Date":
                         latest[
-                            'Published'
+                            "Published"
                         ],
 
-                    'Source':
+                    "Source":
                         latest[
-                            'Source'
+                            "Source"
                         ],
 
-                    'Latest Signal':
+                    "Latest Signal":
                         latest[
-                            'Title'
+                            "Title"
                         ],
 
-                    'Article':
+                    "Article":
                         latest[
-                            'URL'
+                            "URL"
                         ]
                 }
             )
@@ -4244,39 +4322,39 @@ def build_advisory_seller_intelligence():
 
             rows.append(
                 {
-                    'Owner':
+                    "Owner":
                         owner,
 
-                    'Current Motivation':
+                    "Current Motivation":
                         seller[
-                            'Discount Potential'
+                            "Discount Potential"
                         ],
 
-                    'Current Actionability':
+                    "Current Actionability":
                         seller[
-                            'Seller Actionability'
+                            "Seller Actionability"
                         ],
 
-                    'Suggested Motivation':
+                    "Suggested Motivation":
                         np.nan,
 
-                    'Suggested Actionability':
+                    "Suggested Actionability":
                         np.nan,
 
-                    'Signal Type':
-                        'No qualifying recent signal',
+                    "Signal Type":
+                        "No qualifying recent signal",
 
-                    'Signal Date':
+                    "Signal Date":
                         pd.NaT,
 
-                    'Source':
-                        '',
+                    "Source":
+                        "",
 
-                    'Latest Signal':
-                        '',
+                    "Latest Signal":
+                        "",
 
-                    'Article':
-                        ''
+                    "Article":
+                        ""
                 }
             )
 
@@ -4288,22 +4366,22 @@ def build_advisory_seller_intelligence():
 with dashboard_tab:
 
     with st.expander(
-        '📡 Public Seller Intelligence — Informational Only',
+        "📡 Public Seller Intelligence — Informational Only",
         expanded=False
     ):
 
         st.caption(
-            'This feed monitors recent public seller '
-            'signals and provides a suggested direction '
-            'for review. It does NOT change the Seller '
-            'Motivation or Actionability assumptions '
-            'above and therefore does not automatically '
-            'alter project rankings.'
+            "This feed monitors recent public seller "
+            "signals and provides a suggested direction "
+            "for review. It does NOT change the Seller "
+            "Motivation or Actionability assumptions "
+            "above and therefore does not automatically "
+            "alter project rankings."
         )
 
         refresh_intelligence = (
             st.button(
-                '🔄 Refresh Public Signals'
+                "🔄 Refresh Public Signals"
             )
         )
 
@@ -4322,38 +4400,38 @@ with dashboard_tab:
             use_container_width=True,
             hide_index=True,
             column_config={
-                'Current Motivation':
+                "Current Motivation":
                     st.column_config.NumberColumn(
-                        'Current Motivation',
-                        format='%.0f'
+                        "Current Motivation",
+                        format="%.0f"
                     ),
 
-                'Current Actionability':
+                "Current Actionability":
                     st.column_config.NumberColumn(
-                        'Current Actionability',
-                        format='%.0f'
+                        "Current Actionability",
+                        format="%.0f"
                     ),
 
-                'Suggested Motivation':
+                "Suggested Motivation":
                     st.column_config.NumberColumn(
-                        'Suggested Motivation',
-                        format='%.0f'
+                        "Suggested Motivation",
+                        format="%.0f"
                     ),
 
-                'Suggested Actionability':
+                "Suggested Actionability":
                     st.column_config.NumberColumn(
-                        'Suggested Actionability',
-                        format='%.0f'
+                        "Suggested Actionability",
+                        format="%.0f"
                     ),
 
-                'Signal Date':
+                "Signal Date":
                     st.column_config.DateColumn(
-                        'Signal Date'
+                        "Signal Date"
                     ),
 
-                'Article':
+                "Article":
                     st.column_config.LinkColumn(
-                        'Article'
+                        "Article"
                     )
             }
         )
@@ -4361,6 +4439,9 @@ with dashboard_tab:
     st.divider()
 
 
+# ============================================================
+# LOAD DATA
+# ============================================================
 APP_DIR = Path(
     __file__
 ).resolve().parent
@@ -4368,15 +4449,17 @@ APP_DIR = Path(
 
 repo_csv_files = [
     path
+
     for path
     in APP_DIR.rglob(
-        '*.csv'
+        "*.csv"
     )
+
     if path.name.startswith(
         (
-            'Power Projects-',
-            'Power%20Projects-',
-            'Power_Projects-'
+            "Power Projects-",
+            "Power%20Projects-",
+            "Power_Projects-"
         )
     )
 ]
@@ -4397,8 +4480,9 @@ if uploaded_file is not None:
     )
 
     active_data_source = (
-        'Optional uploaded CSV'
+        "Optional uploaded CSV"
     )
+
 
 elif repo_csv_files:
 
@@ -4410,61 +4494,64 @@ elif repo_csv_files:
         repo_csv_files[0].name
     )
 
+
 else:
 
     with dashboard_tab:
 
         st.info(
-            'The Dashboard Guide and scoring '
-            'methodology above are available '
-            'without a CSV. Project rankings '
-            'and project-level tables will '
-            'populate automatically when a '
-            'Power Projects CSV is stored in '
-            'the app repository.'
+            "The Dashboard Guide and scoring "
+            "methodology above are available "
+            "without a CSV. Project rankings "
+            "and project-level tables will "
+            "populate automatically when a "
+            "Power Projects CSV is stored in "
+            "the app repository."
         )
 
     with map_tab:
 
         st.info(
-            'The Map Explorer needs project '
-            'coordinates. Add the latest Power '
-            'Projects CSV to the GitHub / '
-            'Streamlit repository to make the '
-            'project selector and map load '
-            'automatically. A manual upload '
-            'is optional.'
+            "The Map Explorer needs project "
+            "coordinates. Add the latest Power "
+            "Projects CSV to the GitHub / "
+            "Streamlit repository to make the "
+            "project selector and map load "
+            "automatically. A manual upload "
+            "is optional."
         )
 
     with competitor_tab:
 
         st.info(
-            'The ERCOT Competitor Due Diligence '
-            'tab needs the Orennia Power Projects '
-            'CSV. Add the latest export to the '
-            'repository or upload it from the '
-            'sidebar.'
+            "The ERCOT Competitor Due Diligence "
+            "tab needs the Orennia Power Projects "
+            "CSV. Add the latest export to the "
+            "repository or upload it from the "
+            "sidebar."
         )
 
     st.stop()
 
 
 required_columns = [
-    'Power Project Name',
-    'Owner',
-    'Queue ID',
-    'ISO Zone',
-    'Power Project Type',
-    'Capacity (MW)',
-    'First Power Date',
-    'Power Project Status'
+    "Power Project Name",
+    "Owner",
+    "Queue ID",
+    "ISO Zone",
+    "Power Project Type",
+    "Capacity (MW)",
+    "First Power Date",
+    "Power Project Status"
 ]
 
 
 missing_columns = [
     col
+
     for col
     in required_columns
+
     if col
     not in df.columns
 ]
@@ -4475,9 +4562,9 @@ if missing_columns:
     with dashboard_tab:
 
         st.error(
-            'The active project data file '
-            'is missing these required columns: '
-            + ', '.join(
+            "The active project data file "
+            "is missing these required columns: "
+            + ", ".join(
                 missing_columns
             )
         )
@@ -4485,136 +4572,149 @@ if missing_columns:
     with map_tab:
 
         st.error(
-            'The active project data file '
-            'is missing required dashboard '
-            'columns, so the map cannot '
-            'be populated.'
+            "The active project data file "
+            "is missing required dashboard "
+            "columns, so the map cannot "
+            "be populated."
         )
 
     with competitor_tab:
 
         st.error(
-            'The active project data file '
-            'is missing required columns, '
-            'so the Orbit competitor screen '
-            'cannot be populated.'
+            "The active project data file "
+            "is missing required columns, "
+            "so the Orbit competitor screen "
+            "cannot be populated."
         )
 
     st.stop()
 
 
+# ============================================================
+# CLEAN DATA
+# ============================================================
 df[
-    'Owner'
+    "Owner"
 ] = df[
-    'Owner'
+    "Owner"
 ].fillna(
-    ''
+    ""
 )
 
 
 df[
-    'First Power Date'
+    "First Power Date"
 ] = pd.to_datetime(
     df[
-        'First Power Date'
+        "First Power Date"
     ],
-    errors='coerce'
+    errors="coerce"
 )
 
 
 df[
-    'Capacity (MW)'
+    "Capacity (MW)"
 ] = pd.to_numeric(
     df[
-        'Capacity (MW)'
+        "Capacity (MW)"
     ],
-    errors='coerce'
+    errors="coerce"
 )
 
 
 optional_diligence_columns = [
-    'Equipment Manufacturer',
-    'Equipment Model',
-    'EPC',
-    'Integrator'
+    "Equipment Manufacturer",
+    "Equipment Model",
+    "EPC",
+    "Integrator"
 ]
 
 
 available_diligence_columns = [
     col
+
     for col
     in optional_diligence_columns
+
     if col
     in df.columns
 ]
 
 
 optional_interconnection_columns = [
-    'Interconnection Service Type',
-    'Queue Cycle',
-    'Queue Date',
-    'Interconnection Cost Physical ($)',
-    'Interconnection Cost System Upgrade ($)',
-    'Interconnection Cost Total ($)'
+    "Interconnection Service Type",
+    "Queue Cycle",
+    "Queue Date",
+    "Interconnection Cost Physical ($)",
+    "Interconnection Cost System Upgrade ($)",
+    "Interconnection Cost Total ($)"
 ]
 
 
 available_interconnection_columns = [
     col
+
     for col
     in optional_interconnection_columns
+
     if col
     in df.columns
 ]
 
 
 optional_contract_columns = [
-    'Contract Execution Date',
-    'Contract Termination Date',
-    'Contract Term Years (Year)'
+    "Contract Execution Date",
+    "Contract Termination Date",
+    "Contract Term Years (Year)"
 ]
 
 
 available_contract_columns = [
     col
+
     for col
     in optional_contract_columns
+
     if col
     in df.columns
 ]
 
 
 df[
-    'ERCOT Area'
+    "ERCOT Area"
 ] = df[
-    'ISO Zone'
+    "ISO Zone"
 ].apply(
     map_ercot_area
 )
 
 
 df[
-    'Location Score'
+    "Location Score"
 ] = df[
-    'ERCOT Area'
+    "ERCOT Area"
 ].apply(
     location_score
 )
 
 
+# Preserve broader Orennia universe for competitor diligence.
 competitor_source = (
     df.copy()
 )
 
 
+# ============================================================
+# ACQUISITION UNIVERSE
+# ============================================================
 df = df[
     (
         df[
-            'Power Project Type'
+            "Power Project Type"
         ].isin(
             [
-                'Solar',
-                'Storage'
+                "Solar",
+                "Storage"
             ]
         )
     )
@@ -4622,16 +4722,16 @@ df = df[
     (
         (
             df[
-                'Power Project Type'
+                "Power Project Type"
             ]
-            == 'Wind'
+            == "Wind"
         )
         &
         (
             df[
-                'Power Project Status'
+                "Power Project Status"
             ]
-            == 'Operating'
+            == "Operating"
         )
     )
 ].copy()
@@ -4639,9 +4739,9 @@ df = df[
 
 df = df[
     ~df[
-        'Owner'
+        "Owner"
     ].str.contains(
-        'Pine Gate',
+        "Pine Gate",
         case=False,
         na=False
     )
@@ -4649,21 +4749,21 @@ df = df[
 
 
 excluded_projects = [
-    'Texas One',
-    'Rio Lago Solar',
-    'Grapefruit Solar',
-    'Limewood Bell Renewables',
-    'Lavender Storage Project',
-    'Lavender Solar',
-    'Twin Oaks Solar',
-    'Magnolia Solar',
-    'Mesquite Solar'
+    "Texas One",
+    "Rio Lago Solar",
+    "Grapefruit Solar",
+    "Limewood Bell Renewables",
+    "Lavender Storage Project",
+    "Lavender Solar",
+    "Twin Oaks Solar",
+    "Magnolia Solar",
+    "Mesquite Solar"
 ]
 
 
 df = df[
     ~df[
-        'Power Project Name'
+        "Power Project Name"
     ].isin(
         excluded_projects
     )
@@ -4691,54 +4791,54 @@ def get_seller_value(
 
 
 df[
-    'Discount Potential'
+    "Discount Potential"
 ] = df[
-    'Owner'
+    "Owner"
 ].apply(
     lambda x:
         get_seller_value(
             x,
-            'Discount Potential'
+            "Discount Potential"
         )
 )
 
 
 df[
-    'Seller Actionability'
+    "Seller Actionability"
 ] = df[
-    'Owner'
+    "Owner"
 ].apply(
     lambda x:
         get_seller_value(
             x,
-            'Seller Actionability'
+            "Seller Actionability"
         )
 )
 
 
 df[
-    'Seller Confidence'
+    "Seller Confidence"
 ] = df[
-    'Owner'
+    "Owner"
 ].apply(
     lambda x:
         get_seller_value(
             x,
-            'Confidence'
+            "Confidence"
         )
 )
 
 
 df[
-    'Distress Score'
+    "Distress Score"
 ] = df.apply(
     lambda row:
         calculate_discount_score(
             row[
-                'Discount Potential'
+                "Discount Potential"
             ],
             row[
-                'Seller Confidence'
+                "Seller Confidence"
             ]
         ),
     axis=1
@@ -4751,61 +4851,63 @@ def development_stage_score(
 
     status = clean_text(
         row.get(
-            'Power Project Status'
+            "Power Project Status"
         )
     )
 
     detailed = clean_text(
         row.get(
-            'Detailed Status'
+            "Detailed Status"
         )
     )
 
     if (
-        status == 'Operating'
-        or detailed
-        == 'Construction Complete'
+        status == "Operating"
+        or
+        detailed == "Construction Complete"
     ):
 
         return development_operating
 
     if (
-        'More Than 50%'
+        "More Than 50%"
         in detailed
-        or '>50%'
+        or
+        ">50%"
         in detailed
     ):
 
         return development_50
 
-    if status == 'In Construction':
+    if status == "In Construction":
 
         return development_construction
 
     if (
-        status == 'IA Executed'
-        or ', IA'
+        status == "IA Executed"
+        or
+        ", IA"
         in detailed
     ):
 
         return development_ia
 
-    if 'FIS Completed' in detailed:
+    if "FIS Completed" in detailed:
 
         return development_fis_complete
 
-    if 'FIS Started' in detailed:
+    if "FIS Started" in detailed:
 
         return development_fis_started
 
-    if status == 'Pre-Study':
+    if status == "Pre-Study":
 
         return development_pre
 
     if status in [
-        'Inactive',
-        'Suspended',
-        'Retired'
+        "Inactive",
+        "Suspended",
+        "Retired"
     ]:
 
         return development_inactive
@@ -4814,7 +4916,7 @@ def development_stage_score(
 
 
 df[
-    'Development Stage'
+    "Development Stage"
 ] = df.apply(
     development_stage_score,
     axis=1
@@ -4827,17 +4929,21 @@ def revenue_visibility_score(
 
     contract = has_value(
         row.get(
-            'Contract Type'
+            "Contract Type"
         )
     )
 
     offtaker = has_value(
         row.get(
-            'Contract Offtaker'
+            "Contract Offtaker"
         )
     )
 
-    if contract and offtaker:
+    if (
+        contract
+        and
+        offtaker
+    ):
 
         return market_both
 
@@ -4853,7 +4959,7 @@ def revenue_visibility_score(
 
 
 df[
-    'Revenue Visibility'
+    "Revenue Visibility"
 ] = df.apply(
     revenue_visibility_score,
     axis=1
@@ -4861,25 +4967,25 @@ df[
 
 
 df[
-    'Market / Revenue'
+    "Market / Revenue"
 ] = (
     df[
-        'Revenue Visibility'
+        "Revenue Visibility"
     ]
     * revenue_visibility_weight
     +
     df[
-        'Location Score'
+        "Location Score"
     ]
     * location_market_weight
 )
 
 
 energy_columns = [
-    'Fossil Fuel Energy Communities',
-    'Retired Coal Facilities Energy Communities',
-    'Low Income Communities',
-    'Native American Lands'
+    "Fossil Fuel Energy Communities",
+    "Retired Coal Facilities Energy Communities",
+    "Low Income Communities",
+    "Native American Lands"
 ]
 
 
@@ -4900,18 +5006,18 @@ def energy_community(
         ).lower()
 
         if value in [
-            'true',
-            'yes',
-            '1'
+            "true",
+            "yes",
+            "1"
         ]:
 
-            return 'Yes'
+            return "Yes"
 
-    return 'No'
+    return "No"
 
 
 df[
-    'Energy Community'
+    "Energy Community"
 ] = df.apply(
     energy_community,
     axis=1
@@ -4924,20 +5030,21 @@ def acquisition_value(
 
     tax_credit = has_value(
         row.get(
-            'PTC/ITC'
+            "PTC/ITC"
         )
     )
 
     ec = (
         row[
-            'Energy Community'
+            "Energy Community"
         ]
-        == 'Yes'
+        == "Yes"
     )
 
     if (
         tax_credit
-        and ec
+        and
+        ec
     ):
 
         return value_both
@@ -4954,7 +5061,7 @@ def acquisition_value(
 
 
 df[
-    'Acquisition Value'
+    "Acquisition Value"
 ] = df.apply(
     acquisition_value,
     axis=1
@@ -4962,9 +5069,9 @@ df[
 
 
 df[
-    'Domestic Content Review'
+    "Domestic Content Review"
 ] = (
-    'Unknown / Diligence Required'
+    "Unknown / Diligence Required"
 )
 
 
@@ -4978,7 +5085,7 @@ def timing_score(
 ):
 
     cod = row[
-        'First Power Date'
+        "First Power Date"
     ]
 
     if pd.isna(
@@ -5012,7 +5119,7 @@ def timing_score(
 
 
 df[
-    'Timing Score'
+    "Timing Score"
 ] = df.apply(
     timing_score,
     axis=1
@@ -5020,29 +5127,29 @@ df[
 
 
 df[
-    'Actionability Score'
+    "Actionability Score"
 ] = df[
-    'Seller Actionability'
+    "Seller Actionability"
 ].apply(
     actionability_score
 )
 
 
 df[
-    'Executability'
+    "Executability"
 ] = (
     df[
-        'Actionability Score'
+        "Actionability Score"
     ]
     * actionability_weight
     +
     df[
-        'Timing Score'
+        "Timing Score"
     ]
     * timing_exec_weight
     +
     df[
-        'Development Stage'
+        "Development Stage"
     ]
     * development_exec_weight
 )
@@ -5056,7 +5163,7 @@ def completeness(
 
     if has_value(
         row.get(
-            'Owner'
+            "Owner"
         )
     ):
 
@@ -5064,7 +5171,7 @@ def completeness(
 
     if has_value(
         row.get(
-            'Queue ID'
+            "Queue ID"
         )
     ):
 
@@ -5072,7 +5179,7 @@ def completeness(
 
     if not pd.isna(
         row.get(
-            'First Power Date'
+            "First Power Date"
         )
     ):
 
@@ -5081,13 +5188,13 @@ def completeness(
     if (
         has_value(
             row.get(
-                'Contract Type'
+                "Contract Type"
             )
         )
         or
         has_value(
             row.get(
-                'Contract Offtaker'
+                "Contract Offtaker"
             )
         )
     ):
@@ -5096,7 +5203,7 @@ def completeness(
 
     if has_value(
         row.get(
-            'PTC/ITC'
+            "PTC/ITC"
         )
     ):
 
@@ -5106,7 +5213,7 @@ def completeness(
 
 
 df[
-    'Data Completeness'
+    "Data Completeness"
 ] = df.apply(
     completeness,
     axis=1
@@ -5114,30 +5221,30 @@ df[
 
 
 df[
-    'Opportunity Score'
+    "Opportunity Score"
 ] = (
     df[
-        'Distress Score'
+        "Distress Score"
     ]
     * distress_weight
     +
     df[
-        'Development Stage'
+        "Development Stage"
     ]
     * development_weight
     +
     df[
-        'Market / Revenue'
+        "Market / Revenue"
     ]
     * market_weight
     +
     df[
-        'Acquisition Value'
+        "Acquisition Value"
     ]
     * value_weight
     +
     df[
-        'Executability'
+        "Executability"
     ]
     * exec_weight
 ).round(
@@ -5151,35 +5258,35 @@ def action(
 
     if pd.isna(
         row[
-            'Discount Potential'
+            "Discount Potential"
         ]
     ):
 
         return (
-            'RESEARCH / MONITOR'
+            "RESEARCH / MONITOR"
         )
 
     score = row[
-        'Opportunity Score'
+        "Opportunity Score"
     ]
 
     if score >= 80:
 
-        return 'CONTACT / DILIGENCE'
+        return "CONTACT / DILIGENCE"
 
     if score >= 70:
 
-        return 'INVESTIGATE'
+        return "INVESTIGATE"
 
     if score >= 60:
 
-        return 'MONITOR'
+        return "MONITOR"
 
-    return 'LOW PRIORITY'
+    return "LOW PRIORITY"
 
 
 df[
-    'Action'
+    "Action"
 ] = df.apply(
     action,
     axis=1
@@ -5189,9 +5296,9 @@ df[
 df = (
     df.sort_values(
         by=[
-            'Opportunity Score',
-            'Data Completeness',
-            'Capacity (MW)'
+            "Opportunity Score",
+            "Data Completeness",
+            "Capacity (MW)"
         ],
         ascending=[
             False,
@@ -5206,7 +5313,7 @@ df = (
 
 
 df[
-    'Rank'
+    "Rank"
 ] = np.arange(
     1,
     len(
@@ -5223,105 +5330,105 @@ def why_it_ranks(
 
     if (
         row[
-            'Distress Score'
+            "Distress Score"
         ]
         >= 70
     ):
 
         reasons.append(
-            'Strong seller motivation / transaction angle'
+            "Strong seller motivation / transaction angle"
         )
 
     elif (
         row[
-            'Distress Score'
+            "Distress Score"
         ]
         >= 50
     ):
 
         reasons.append(
-            'Credible seller opportunity'
+            "Credible seller opportunity"
         )
 
     if (
         row[
-            'Development Stage'
+            "Development Stage"
         ]
         >= 95
     ):
 
         reasons.append(
-            'Operating / highly mature project'
+            "Operating / highly mature project"
         )
 
     elif (
         row[
-            'Development Stage'
+            "Development Stage"
         ]
         >= 80
     ):
 
         reasons.append(
-            'Advanced development stage'
+            "Advanced development stage"
         )
 
     if (
         row[
-            'Revenue Visibility'
+            "Revenue Visibility"
         ]
         >= 90
     ):
 
         reasons.append(
-            'Strong revenue / offtaker visibility'
+            "Strong revenue / offtaker visibility"
         )
 
     elif (
         row[
-            'Revenue Visibility'
+            "Revenue Visibility"
         ]
         >= 80
     ):
 
         reasons.append(
-            'Some contracted visibility'
+            "Some contracted visibility"
         )
 
     if (
         row[
-            'Location Score'
+            "Location Score"
         ]
         >= 85
     ):
 
         reasons.append(
-            'Attractive ERCOT market location'
+            "Attractive ERCOT market location"
         )
 
     if (
         row[
-            'Acquisition Value'
+            "Acquisition Value"
         ]
         >= 70
     ):
 
         reasons.append(
-            'Attractive tax-credit / siting attributes'
+            "Attractive tax-credit / siting attributes"
         )
 
     if (
         row[
-            'Executability'
+            "Executability"
         ]
         >= 80
     ):
 
         reasons.append(
-            'High execution readiness'
+            "High execution readiness"
         )
 
     capacity = row.get(
-        'Capacity (MW)',
+        "Capacity (MW)",
         np.nan
     )
 
@@ -5329,20 +5436,21 @@ def why_it_ranks(
         not pd.isna(
             capacity
         )
-        and capacity >= 100
+        and
+        capacity >= 100
     ):
 
         reasons.append(
-            f'{capacity:,.0f} MW scale'
+            f"{capacity:,.0f} MW scale"
         )
 
     if not reasons:
 
         reasons.append(
-            'Strong composite Opportunity Score'
+            "Strong composite Opportunity Score"
         )
 
-    return '; '.join(
+    return "; ".join(
         reasons[:3]
     )
 
@@ -5355,115 +5463,115 @@ def key_risk(
 
     if pd.isna(
         row[
-            'Discount Potential'
+            "Discount Potential"
         ]
     ):
 
         risks.append(
-            'Seller motivation not yet verified'
+            "Seller motivation not yet verified"
         )
 
     elif (
         row[
-            'Distress Score'
+            "Distress Score"
         ]
         < 50
     ):
 
         risks.append(
-            'Limited evidence of seller pressure'
+            "Limited evidence of seller pressure"
         )
 
     if (
         row[
-            'Development Stage'
+            "Development Stage"
         ]
         < 55
     ):
 
         risks.append(
-            'Early-stage development risk'
+            "Early-stage development risk"
         )
 
     elif (
         row[
-            'Development Stage'
+            "Development Stage"
         ]
         < 75
     ):
 
         risks.append(
-            'Development risk remains'
+            "Development risk remains"
         )
 
     if (
         row[
-            'Revenue Visibility'
+            "Revenue Visibility"
         ]
         <= 45
     ):
 
         risks.append(
-            'Limited visible revenue certainty'
+            "Limited visible revenue certainty"
         )
 
     elif (
         row[
-            'Revenue Visibility'
+            "Revenue Visibility"
         ]
         < 90
     ):
 
         risks.append(
-            'Revenue / offtaker visibility is incomplete'
+            "Revenue / offtaker visibility is incomplete"
         )
 
     if (
         row[
-            'Location Score'
+            "Location Score"
         ]
         <= 50
     ):
 
         risks.append(
-            'Lower broad-area location score; node may differ'
+            "Lower broad-area location score; node may differ"
         )
 
     if pd.isna(
         row[
-            'First Power Date'
+            "First Power Date"
         ]
     ):
 
         risks.append(
-            'COD timing unclear'
+            "COD timing unclear"
         )
 
     if (
         row[
-            'Data Completeness'
+            "Data Completeness"
         ]
         < 70
     ):
 
         risks.append(
-            'Material diligence data gaps'
+            "Material diligence data gaps"
         )
 
     if not risks:
 
         risks.append(
-            'No major screen-level issue; '
-            'full diligence still required'
+            "No major screen-level issue; "
+            "full diligence still required"
         )
 
-    return '; '.join(
+    return "; ".join(
         risks[:2]
     )
 
 
 df[
-    'Why It Ranks'
+    "Why It Ranks"
 ] = df.apply(
     why_it_ranks,
     axis=1
@@ -5471,7 +5579,7 @@ df[
 
 
 df[
-    'Key Risk'
+    "Key Risk"
 ] = df.apply(
     key_risk,
     axis=1
@@ -5479,59 +5587,57 @@ df[
 
 
 df[
-    'Recommended Action'
+    "Recommended Action"
 ] = df[
-    'Action'
+    "Action"
 ]
 
 
+# ============================================================
+# ACQUISITION DASHBOARD
+# ============================================================
 with dashboard_tab:
 
-    (
-        c1,
-        c2,
-        c3,
-        c4
-    ) = st.columns(
+    c1, c2, c3, c4 = st.columns(
         4
     )
 
     c1.metric(
-        'Projects Screened',
-        f'{len(df):,}'
+        "Projects Screened",
+        f"{len(df):,}"
     )
 
     c2.metric(
-        'Total Capacity',
+        "Total Capacity",
         f"{df['Capacity (MW)'].sum():,.0f} MW"
     )
 
     c3.metric(
-        'Contact / Diligence',
+        "Contact / Diligence",
         int(
             (
                 df[
-                    'Action'
+                    "Action"
                 ]
-                == 'CONTACT / DILIGENCE'
+                == "CONTACT / DILIGENCE"
             ).sum()
         )
     )
 
     c4.metric(
-        'Top Score',
+        "Top Score",
         f"{df['Opportunity Score'].max():.1f}"
     )
 
     st.divider()
 
     st.subheader(
-        '🎯 Management Shortlist'
+        "🎯 Management Shortlist"
     )
 
     st.caption(
-        'Top five current acquisition priorities '
-        'based on the screening model.'
+        "Top five current acquisition priorities "
+        "based on the screening model."
     )
 
     management_shortlist = (
@@ -5541,7 +5647,7 @@ with dashboard_tab:
     )
 
     management_shortlist[
-        'Management Rank'
+        "Management Rank"
     ] = np.arange(
         1,
         len(
@@ -5550,24 +5656,26 @@ with dashboard_tab:
     )
 
     management_columns = [
-        'Management Rank',
-        'Power Project Name',
-        'Owner',
-        'Power Project Type',
-        'ERCOT Area',
-        'Location Score',
-        'Capacity (MW)',
-        'Power Project Status',
-        'Opportunity Score',
-        'Why It Ranks',
-        'Key Risk',
-        'Recommended Action'
+        "Management Rank",
+        "Power Project Name",
+        "Owner",
+        "Power Project Type",
+        "ERCOT Area",
+        "Location Score",
+        "Capacity (MW)",
+        "Power Project Status",
+        "Opportunity Score",
+        "Why It Ranks",
+        "Key Risk",
+        "Recommended Action"
     ]
 
     management_columns = [
         col
+
         for col
         in management_columns
+
         if col
         in management_shortlist.columns
     ]
@@ -5579,39 +5687,39 @@ with dashboard_tab:
         use_container_width=True,
         hide_index=True,
         column_config={
-            'Management Rank':
+            "Management Rank":
                 st.column_config.NumberColumn(
-                    'Rank'
+                    "Rank"
                 ),
 
-            'Power Project Type':
+            "Power Project Type":
                 st.column_config.TextColumn(
-                    'Tech'
+                    "Tech"
                 ),
 
-            'Capacity (MW)':
+            "Capacity (MW)":
                 st.column_config.NumberColumn(
-                    'MW',
-                    format='%.1f'
+                    "MW",
+                    format="%.1f"
                 ),
 
-            'Location Score':
+            "Location Score":
                 st.column_config.NumberColumn(
-                    'Location',
-                    format='%.0f'
+                    "Location",
+                    format="%.0f"
                 ),
 
-            'Opportunity Score':
+            "Opportunity Score":
                 st.column_config.ProgressColumn(
-                    'Score',
+                    "Score",
                     min_value=0,
                     max_value=100,
-                    format='%.1f'
+                    format="%.1f"
                 ),
 
-            'Recommended Action':
+            "Recommended Action":
                 st.column_config.TextColumn(
-                    'Action'
+                    "Action"
                 )
         }
     )
@@ -5619,27 +5727,22 @@ with dashboard_tab:
     st.divider()
 
     st.subheader(
-        'Filters'
+        "Filters"
     )
 
-    (
-        f1,
-        f2,
-        f3,
-        f4
-    ) = st.columns(
+    f1, f2, f3, f4 = st.columns(
         4
     )
 
     technology_options = sorted(
         df[
-            'Power Project Type'
+            "Power Project Type"
         ].dropna().unique()
     )
 
     selected_technology = (
         f1.multiselect(
-            'Technology',
+            "Technology",
             technology_options,
             default=
                 technology_options
@@ -5648,13 +5751,13 @@ with dashboard_tab:
 
     ercot_area_options = sorted(
         df[
-            'ERCOT Area'
+            "ERCOT Area"
         ].dropna().unique()
     )
 
     selected_ercot_areas = (
         f2.multiselect(
-            'ERCOT Area',
+            "ERCOT Area",
             ercot_area_options,
             default=
                 ercot_area_options
@@ -5664,10 +5767,12 @@ with dashboard_tab:
     owner_options = sorted(
         [
             owner
+
             for owner
             in df[
-                'Owner'
+                "Owner"
             ].unique()
+
             if clean_text(
                 owner
             )
@@ -5676,20 +5781,20 @@ with dashboard_tab:
 
     selected_owners = (
         f3.multiselect(
-            'Owner',
+            "Owner",
             owner_options
         )
     )
 
     status_options = sorted(
         df[
-            'Power Project Status'
+            "Power Project Status"
         ].dropna().unique()
     )
 
     selected_status = (
         f4.multiselect(
-            'Project Status',
+            "Project Status",
             status_options,
             default=
                 status_options
@@ -5698,7 +5803,7 @@ with dashboard_tab:
 
     filtered = df[
         df[
-            'Power Project Type'
+            "Power Project Type"
         ].isin(
             selected_technology
         )
@@ -5706,7 +5811,7 @@ with dashboard_tab:
 
     filtered = filtered[
         filtered[
-            'ERCOT Area'
+            "ERCOT Area"
         ].isin(
             selected_ercot_areas
         )
@@ -5714,7 +5819,7 @@ with dashboard_tab:
 
     filtered = filtered[
         filtered[
-            'Power Project Status'
+            "Power Project Status"
         ].isin(
             selected_status
         )
@@ -5724,7 +5829,7 @@ with dashboard_tab:
 
         filtered = filtered[
             filtered[
-                'Owner'
+                "Owner"
             ].isin(
                 selected_owners
             )
@@ -5733,40 +5838,42 @@ with dashboard_tab:
     st.divider()
 
     st.subheader(
-        '🏆 Top Acquisition Targets'
+        "🏆 Top Acquisition Targets"
     )
 
     st.caption(
-        'Top 20 projects based on Opportunity Score.'
+        "Top 20 projects based on Opportunity Score."
     )
 
     display_columns = [
-        'Rank',
-        'Power Project Name',
-        'Owner',
-        'Power Project Type',
-        'ERCOT Area',
-        'ISO Zone',
-        'Location Score',
-        'Capacity (MW)',
-        'Power Project Status',
-        'First Power Date',
-        'Contract Type',
-        'Contract Offtaker',
-        'Distress Score',
-        'Development Stage',
-        'Revenue Visibility',
-        'Market / Revenue',
-        'Acquisition Value',
-        'Executability',
-        'Opportunity Score',
-        'Action'
+        "Rank",
+        "Power Project Name",
+        "Owner",
+        "Power Project Type",
+        "ERCOT Area",
+        "ISO Zone",
+        "Location Score",
+        "Capacity (MW)",
+        "Power Project Status",
+        "First Power Date",
+        "Contract Type",
+        "Contract Offtaker",
+        "Distress Score",
+        "Development Stage",
+        "Revenue Visibility",
+        "Market / Revenue",
+        "Acquisition Value",
+        "Executability",
+        "Opportunity Score",
+        "Action"
     ]
 
     existing_display_columns = [
         col
+
         for col
         in display_columns
+
         if col
         in filtered.columns
     ]
@@ -5785,46 +5892,46 @@ with dashboard_tab:
         use_container_width=True,
         hide_index=True,
         column_config={
-            'Distress Score':
+            "Distress Score":
                 st.column_config.NumberColumn(
-                    'Seller Motivation'
+                    "Seller Motivation"
                 ),
 
-            'Development Stage':
+            "Development Stage":
                 st.column_config.NumberColumn(
-                    'Development Stage',
-                    format='%.1f'
+                    "Development Stage",
+                    format="%.1f"
                 ),
 
-            'Revenue Visibility':
+            "Revenue Visibility":
                 st.column_config.NumberColumn(
-                    'Revenue Visibility',
-                    format='%.1f'
+                    "Revenue Visibility",
+                    format="%.1f"
                 ),
 
-            'Location Score':
+            "Location Score":
                 st.column_config.NumberColumn(
-                    'Location',
-                    format='%.0f'
+                    "Location",
+                    format="%.0f"
                 ),
 
-            'Market / Revenue':
+            "Market / Revenue":
                 st.column_config.NumberColumn(
-                    'Market / Revenue',
-                    format='%.1f'
+                    "Market / Revenue",
+                    format="%.1f"
                 ),
 
-            'Opportunity Score':
+            "Opportunity Score":
                 st.column_config.ProgressColumn(
-                    'Opportunity Score',
+                    "Opportunity Score",
                     min_value=0,
                     max_value=100,
-                    format='%.1f'
+                    format="%.1f"
                 ),
 
-            'First Power Date':
+            "First Power Date":
                 st.column_config.DateColumn(
-                    'COD'
+                    "COD"
                 )
         }
     )
@@ -5832,28 +5939,25 @@ with dashboard_tab:
     st.divider()
 
     st.subheader(
-        '⚡ Top Projects by Technology'
+        "⚡ Top Projects by Technology"
     )
 
     tech_options = sorted(
         df[
-            'Power Project Type'
+            "Power Project Type"
         ].dropna().unique()
     )
 
-    selected_tech_rank = (
-        st.selectbox(
-            'Select Technology',
-            tech_options,
-            key=
-                'technology_ranking'
-        )
+    selected_tech_rank = st.selectbox(
+        "Select Technology",
+        tech_options,
+        key="technology_ranking"
     )
 
     technology_ranked = (
         df[
             df[
-                'Power Project Type'
+                "Power Project Type"
             ]
             == selected_tech_rank
         ].copy()
@@ -5863,9 +5967,9 @@ with dashboard_tab:
         technology_ranked
         .sort_values(
             by=[
-                'Opportunity Score',
-                'Data Completeness',
-                'Capacity (MW)'
+                "Opportunity Score",
+                "Data Completeness",
+                "Capacity (MW)"
             ],
             ascending=[
                 False,
@@ -5879,7 +5983,7 @@ with dashboard_tab:
     )
 
     technology_ranked[
-        'Technology Rank'
+        "Technology Rank"
     ] = np.arange(
         1,
         len(
@@ -5895,51 +5999,49 @@ with dashboard_tab:
     )
 
     tech_columns = [
-        'Technology Rank',
-        'Power Project Name',
-        'Owner',
-        'ERCOT Area',
-        'Location Score',
-        'Capacity (MW)',
-        'Power Project Status',
-        'First Power Date',
-        'Contract Type',
-        'Contract Offtaker',
-        'Distress Score',
-        'Development Stage',
-        'Revenue Visibility',
-        'Market / Revenue',
-        'Acquisition Value',
-        'Executability',
-        'Opportunity Score',
-        'Action'
+        "Technology Rank",
+        "Power Project Name",
+        "Owner",
+        "ERCOT Area",
+        "Location Score",
+        "Capacity (MW)",
+        "Power Project Status",
+        "First Power Date",
+        "Contract Type",
+        "Contract Offtaker",
+        "Distress Score",
+        "Development Stage",
+        "Revenue Visibility",
+        "Market / Revenue",
+        "Acquisition Value",
+        "Executability",
+        "Opportunity Score",
+        "Action"
     ]
 
     tech_columns = [
         col
+
         for col
         in tech_columns
+
         if col
         in technology_top_20.columns
     ]
 
-    (
-        t1,
-        t2,
-        t3
-    ) = st.columns(
+    t1, t2, t3 = st.columns(
         3
     )
 
     t1.metric(
-        f'{selected_tech_rank} Projects',
+        f"{selected_tech_rank} Projects",
         len(
             technology_ranked
         )
     )
 
     t2.metric(
-        f'{selected_tech_rank} Capacity',
+        f"{selected_tech_rank} Capacity",
         f"{technology_ranked['Capacity (MW)'].sum():,.0f} MW"
     )
 
@@ -5948,7 +6050,7 @@ with dashboard_tab:
     ) > 0:
 
         t3.metric(
-            'Top Technology Score',
+            "Top Technology Score",
             f"{technology_ranked['Opportunity Score'].max():.1f}"
         )
 
@@ -5959,51 +6061,51 @@ with dashboard_tab:
         use_container_width=True,
         hide_index=True,
         column_config={
-            'Technology Rank':
+            "Technology Rank":
                 st.column_config.NumberColumn(
-                    'Rank'
+                    "Rank"
                 ),
 
-            'Distress Score':
+            "Distress Score":
                 st.column_config.NumberColumn(
-                    'Seller Motivation'
+                    "Seller Motivation"
                 ),
 
-            'Development Stage':
+            "Development Stage":
                 st.column_config.NumberColumn(
-                    'Development Stage',
-                    format='%.1f'
+                    "Development Stage",
+                    format="%.1f"
                 ),
 
-            'Location Score':
+            "Location Score":
                 st.column_config.NumberColumn(
-                    'Location',
-                    format='%.0f'
+                    "Location",
+                    format="%.0f"
                 ),
 
-            'Revenue Visibility':
+            "Revenue Visibility":
                 st.column_config.NumberColumn(
-                    'Revenue Visibility',
-                    format='%.1f'
+                    "Revenue Visibility",
+                    format="%.1f"
                 ),
 
-            'Market / Revenue':
+            "Market / Revenue":
                 st.column_config.NumberColumn(
-                    'Market / Revenue',
-                    format='%.1f'
+                    "Market / Revenue",
+                    format="%.1f"
                 ),
 
-            'First Power Date':
+            "First Power Date":
                 st.column_config.DateColumn(
-                    'COD'
+                    "COD"
                 ),
 
-            'Opportunity Score':
+            "Opportunity Score":
                 st.column_config.ProgressColumn(
-                    'Opportunity Score',
+                    "Opportunity Score",
                     min_value=0,
                     max_value=100,
-                    format='%.1f'
+                    format="%.1f"
                 )
         }
     )
@@ -6011,46 +6113,46 @@ with dashboard_tab:
     st.divider()
 
     st.subheader(
-        '🗺️ ERCOT Area Summary'
+        "🗺️ ERCOT Area Summary"
     )
 
     st.caption(
-        'Broad market-location screen by ERCOT area. '
-        'Location affects 30% of Market / Revenue '
-        f'and currently '
-        f'{location_market_weight * market_weight:.1%} '
-        'of the total Opportunity Score.'
+        "Broad market-location screen by ERCOT area. "
+        "Location affects 30% of Market / Revenue "
+        f"and currently "
+        f"{location_market_weight * market_weight:.1%} "
+        "of the total Opportunity Score."
     )
 
     area_summary = (
         df.groupby(
-            'ERCOT Area',
+            "ERCOT Area",
             as_index=False
         )
         .agg(
             Projects=(
-                'Power Project Name',
-                'count'
+                "Power Project Name",
+                "count"
             ),
 
             MW=(
-                'Capacity (MW)',
-                'sum'
+                "Capacity (MW)",
+                "sum"
             ),
 
             Location_Score=(
-                'Location Score',
-                'mean'
+                "Location Score",
+                "mean"
             ),
 
             Average_Score=(
-                'Opportunity Score',
-                'mean'
+                "Opportunity Score",
+                "mean"
             ),
 
             Best_Score=(
-                'Opportunity Score',
-                'max'
+                "Opportunity Score",
+                "max"
             )
         )
     )
@@ -6059,8 +6161,8 @@ with dashboard_tab:
         area_summary
         .sort_values(
             by=[
-                'Location_Score',
-                'Average_Score'
+                "Location_Score",
+                "Average_Score"
             ],
             ascending=[
                 False,
@@ -6072,14 +6174,14 @@ with dashboard_tab:
     area_summary_display = (
         area_summary.rename(
             columns={
-                'Location_Score':
-                    'Location Score',
+                "Location_Score":
+                    "Location Score",
 
-                'Average_Score':
-                    'Average Score',
+                "Average_Score":
+                    "Average Score",
 
-                'Best_Score':
-                    'Best Score'
+                "Best_Score":
+                    "Best Score"
             }
         )
     )
@@ -6089,30 +6191,30 @@ with dashboard_tab:
         use_container_width=True,
         hide_index=True,
         column_config={
-            'MW':
+            "MW":
                 st.column_config.NumberColumn(
-                    'MW',
-                    format='%.0f'
+                    "MW",
+                    format="%.0f"
                 ),
 
-            'Location Score':
+            "Location Score":
                 st.column_config.ProgressColumn(
-                    'Location Score',
+                    "Location Score",
                     min_value=0,
                     max_value=100,
-                    format='%.0f'
+                    format="%.0f"
                 ),
 
-            'Average Score':
+            "Average Score":
                 st.column_config.NumberColumn(
-                    'Average Score',
-                    format='%.1f'
+                    "Average Score",
+                    format="%.1f"
                 ),
 
-            'Best Score':
+            "Best Score":
                 st.column_config.NumberColumn(
-                    'Best Score',
-                    format='%.1f'
+                    "Best Score",
+                    format="%.1f"
                 )
         }
     )
@@ -6120,23 +6222,23 @@ with dashboard_tab:
     st.divider()
 
     st.subheader(
-        '📦 Bundle Opportunities'
+        "📦 Bundle Opportunities"
     )
 
     st.caption(
-        'Owners with at least two 50–60 MW '
-        'projects. Bundles are ranked by '
-        'average Opportunity Score.'
+        "Owners with at least two 50–60 MW "
+        "projects. Bundles are ranked by "
+        "average Opportunity Score."
     )
 
     bundle_candidates = (
         df[
             df[
-                'Capacity (MW)'
+                "Capacity (MW)"
             ].between(
                 50,
                 60,
-                inclusive='both'
+                inclusive="both"
             )
         ]
         .copy()
@@ -6145,28 +6247,28 @@ with dashboard_tab:
     bundle_summary = (
         bundle_candidates
         .groupby(
-            'Owner',
+            "Owner",
             as_index=False
         )
         .agg(
             Bundle_Projects=(
-                'Power Project Name',
-                'count'
+                "Power Project Name",
+                "count"
             ),
 
             Bundle_MW=(
-                'Capacity (MW)',
-                'sum'
+                "Capacity (MW)",
+                "sum"
             ),
 
             Average_Score=(
-                'Opportunity Score',
-                'mean'
+                "Opportunity Score",
+                "mean"
             ),
 
             Best_Score=(
-                'Opportunity Score',
-                'max'
+                "Opportunity Score",
+                "max"
             )
         )
     )
@@ -6174,7 +6276,7 @@ with dashboard_tab:
     bundle_summary = (
         bundle_summary[
             bundle_summary[
-                'Bundle_Projects'
+                "Bundle_Projects"
             ]
             >= 2
         ]
@@ -6185,9 +6287,9 @@ with dashboard_tab:
         bundle_summary
         .sort_values(
             by=[
-                'Average_Score',
-                'Best_Score',
-                'Bundle_MW'
+                "Average_Score",
+                "Best_Score",
+                "Bundle_MW"
             ],
             ascending=[
                 False,
@@ -6202,7 +6304,7 @@ with dashboard_tab:
 
     bundle_summary.insert(
         0,
-        'Bundle Rank',
+        "Bundle Rank",
         np.arange(
             1,
             len(
@@ -6214,8 +6316,8 @@ with dashboard_tab:
     if bundle_summary.empty:
 
         st.info(
-            'No owners currently have '
-            'multiple 50–60 MW projects.'
+            "No owners currently have multiple "
+            "50–60 MW projects."
         )
 
     else:
@@ -6223,17 +6325,17 @@ with dashboard_tab:
         bundle_summary_display = (
             bundle_summary.rename(
                 columns={
-                    'Bundle_Projects':
-                        'Projects',
+                    "Bundle_Projects":
+                        "Projects",
 
-                    'Bundle_MW':
-                        'Total MW',
+                    "Bundle_MW":
+                        "Total MW",
 
-                    'Average_Score':
-                        'Average Score',
+                    "Average_Score":
+                        "Average Score",
 
-                    'Best_Score':
-                        'Best Score'
+                    "Best_Score":
+                        "Best Score"
                 }
             )
         )
@@ -6243,31 +6345,31 @@ with dashboard_tab:
             use_container_width=True,
             hide_index=True,
             column_config={
-                'Bundle Rank':
+                "Bundle Rank":
                     st.column_config.NumberColumn(
-                        'Rank'
+                        "Rank"
                     ),
 
-                'Average Score':
+                "Average Score":
                     st.column_config.ProgressColumn(
-                        'Average Score',
+                        "Average Score",
                         min_value=0,
                         max_value=100,
-                        format='%.1f'
+                        format="%.1f"
                     ),
 
-                'Best Score':
+                "Best Score":
                     st.column_config.ProgressColumn(
-                        'Best Score',
+                        "Best Score",
                         min_value=0,
                         max_value=100,
-                        format='%.1f'
+                        format="%.1f"
                     ),
 
-                'Total MW':
+                "Total MW":
                     st.column_config.NumberColumn(
-                        'Total MW',
-                        format='%.1f MW'
+                        "Total MW",
+                        format="%.1f MW"
                     )
             }
         )
@@ -6275,76 +6377,78 @@ with dashboard_tab:
         for _, bundle in bundle_summary.iterrows():
 
             bundle_owner = bundle[
-                'Owner'
+                "Owner"
             ]
 
             bundle_rank = int(
                 bundle[
-                    'Bundle Rank'
+                    "Bundle Rank"
                 ]
             )
 
             bundle_count = int(
                 bundle[
-                    'Bundle_Projects'
+                    "Bundle_Projects"
                 ]
             )
 
             bundle_mw = bundle[
-                'Bundle_MW'
+                "Bundle_MW"
             ]
 
             bundle_avg = bundle[
-                'Average_Score'
+                "Average_Score"
             ]
 
             owner_projects = (
                 bundle_candidates[
                     bundle_candidates[
-                        'Owner'
+                        "Owner"
                     ]
                     == bundle_owner
                 ]
                 .sort_values(
-                    'Opportunity Score',
+                    "Opportunity Score",
                     ascending=False
                 )
             )
 
             with st.expander(
-                f'#{bundle_rank} 📦 '
-                f'{bundle_owner} — '
-                f'{bundle_count} projects | '
-                f'{bundle_mw:,.1f} MW | '
-                f'Avg Score {bundle_avg:.1f}'
+                f"#{bundle_rank} 📦 "
+                f"{bundle_owner} — "
+                f"{bundle_count} projects | "
+                f"{bundle_mw:,.1f} MW | "
+                f"Avg Score {bundle_avg:.1f}"
             ):
 
                 bundle_columns = [
-                    'Power Project Name',
-                    'ERCOT Area',
-                    'ISO Zone',
-                    'Location Score',
-                    'Capacity (MW)',
-                    'Power Project Type',
-                    'Power Project Status',
-                    'First Power Date',
-                    'Queue ID',
-                    'Contract Type',
-                    'Contract Offtaker',
-                    'Distress Score',
-                    'Development Stage',
-                    'Revenue Visibility',
-                    'Market / Revenue',
-                    'Acquisition Value',
-                    'Executability',
-                    'Opportunity Score',
-                    'Action'
+                    "Power Project Name",
+                    "ERCOT Area",
+                    "ISO Zone",
+                    "Location Score",
+                    "Capacity (MW)",
+                    "Power Project Type",
+                    "Power Project Status",
+                    "First Power Date",
+                    "Queue ID",
+                    "Contract Type",
+                    "Contract Offtaker",
+                    "Distress Score",
+                    "Development Stage",
+                    "Revenue Visibility",
+                    "Market / Revenue",
+                    "Acquisition Value",
+                    "Executability",
+                    "Opportunity Score",
+                    "Action"
                 ]
 
                 bundle_columns = [
                     col
+
                     for col
                     in bundle_columns
+
                     if col
                     in owner_projects.columns
                 ]
@@ -6360,75 +6464,66 @@ with dashboard_tab:
     st.divider()
 
     st.subheader(
-        '🔎 Score Breakdown'
+        "🔎 Score Breakdown"
     )
 
     if len(
         filtered
     ) > 0:
 
-        selected_project = (
-            st.selectbox(
-                'Select a Project',
-                filtered[
-                    'Power Project Name'
-                ].tolist(),
-                key=
-                    'score_breakdown_project'
-            )
+        selected_project = st.selectbox(
+            "Select a Project",
+            filtered[
+                "Power Project Name"
+            ].tolist(),
+            key="score_breakdown_project"
         )
 
         project = (
             filtered[
                 filtered[
-                    'Power Project Name'
+                    "Power Project Name"
                 ]
                 == selected_project
             ]
             .iloc[0]
         )
 
-        (
-            p1,
-            p2,
-            p3,
-            p4,
-            p5
-        ) = st.columns(
+        p1, p2, p3, p4, p5 = st.columns(
             5
         )
 
         p1.metric(
-            'ERCOT Area',
+            "ERCOT Area",
             project[
-                'ERCOT Area'
+                "ERCOT Area"
             ]
         )
 
         p2.metric(
-            'Location Score',
+            "Location Score",
             f"{project['Location Score']:.0f}"
         )
 
         p3.metric(
-            'COD',
+            "COD",
             format_date(
                 project.get(
-                    'First Power Date'
+                    "First Power Date"
                 )
             )
         )
 
         p4.metric(
-            'Capacity',
+            "Capacity",
             f"{project['Capacity (MW)']:,.1f} MW"
         )
 
         p5.metric(
-            'Status',
+            "Status",
             clean_text(
                 project.get(
-                    'Power Project Status'
+                    "Power Project Status"
                 )
             )
         )
@@ -6440,7 +6535,7 @@ with dashboard_tab:
 
         if has_value(
             project.get(
-                'Point of Interconnection'
+                "Point of Interconnection"
             )
         ):
 
@@ -6450,29 +6545,25 @@ with dashboard_tab:
             )
 
         st.markdown(
-            '#### Market / Revenue'
+            "#### Market / Revenue"
         )
 
-        (
-            m1,
-            m2,
-            m3
-        ) = st.columns(
+        m1, m2, m3 = st.columns(
             3
         )
 
         m1.metric(
-            'Revenue Visibility',
+            "Revenue Visibility",
             f"{project['Revenue Visibility']:.1f}"
         )
 
         m2.metric(
-            'Location Score',
+            "Location Score",
             f"{project['Location Score']:.1f}"
         )
 
         m3.metric(
-            'Market / Revenue Score',
+            "Market / Revenue Score",
             f"{project['Market / Revenue']:.1f}"
         )
 
@@ -6486,79 +6577,68 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '#### Opportunity Score'
+            "#### Opportunity Score"
         )
 
-        (
-            s1,
-            s2,
-            s3,
-            s4,
-            s5
-        ) = st.columns(
+        s1, s2, s3, s4, s5 = st.columns(
             5
         )
 
         s1.metric(
-            'Seller Motivation',
+            "Seller Motivation",
             f"{project['Distress Score']:.1f}"
         )
 
         s2.metric(
-            'Development Stage',
+            "Development Stage",
             f"{project['Development Stage']:.1f}"
         )
 
         s3.metric(
-            'Market / Revenue',
+            "Market / Revenue",
             f"{project['Market / Revenue']:.1f}"
         )
 
         s4.metric(
-            'Acquisition Value',
+            "Acquisition Value",
             f"{project['Acquisition Value']:.1f}"
         )
 
         s5.metric(
-            'Executability',
+            "Executability",
             f"{project['Executability']:.1f}"
         )
 
         st.metric(
-            'Total Opportunity Score',
+            "Total Opportunity Score",
             f"{project['Opportunity Score']:.2f}"
         )
 
         st.markdown(
-            '#### Executability Detail'
+            "#### Executability Detail"
         )
 
-        (
-            e1,
-            e2,
-            e3,
-            e4
-        ) = st.columns(
+        e1, e2, e3, e4 = st.columns(
             4
         )
 
         e1.metric(
-            'Seller Actionability',
+            "Seller Actionability",
             f"{project['Actionability Score']:.1f}"
         )
 
         e2.metric(
-            'Timing Score',
+            "Timing Score",
             f"{project['Timing Score']:.1f}"
         )
 
         e3.metric(
-            'Development Stage',
+            "Development Stage",
             f"{project['Development Stage']:.1f}"
         )
 
         e4.metric(
-            'Executability',
+            "Executability",
             f"{project['Executability']:.1f}"
         )
 
@@ -6574,54 +6654,50 @@ with dashboard_tab:
         )
 
         st.markdown(
-            '#### Tax Credit Review'
+            "#### Tax Credit Review"
         )
 
-        (
-            tax1,
-            tax2,
-            tax3
-        ) = st.columns(
+        tax1, tax2, tax3 = st.columns(
             3
         )
 
         tax1.metric(
-            'PTC / ITC',
+            "PTC / ITC",
             clean_text(
                 project.get(
-                    'PTC/ITC'
+                    "PTC/ITC"
                 )
             )
-            or 'Not Identified'
+            or "Not Identified"
         )
 
         tax2.metric(
-            'Energy Community Screen',
+            "Energy Community Screen",
             project[
-                'Energy Community'
+                "Energy Community"
             ]
         )
 
         tax3.metric(
-            'Domestic Content',
+            "Domestic Content",
             project[
-                'Domestic Content Review'
+                "Domestic Content Review"
             ]
         )
 
         st.caption(
-            'Domestic Content is not automatically '
-            'scored. Orennia does not currently '
-            'provide a native project-level Domestic '
-            'Content qualification field, so '
-            'qualification requires project-specific '
-            'diligence.'
+            "Domestic Content is not automatically "
+            "scored. Orennia does not currently "
+            "provide a native project-level Domestic "
+            "Content qualification field, so "
+            "qualification requires project-specific "
+            "diligence."
         )
 
         if available_diligence_columns:
 
             with st.expander(
-                '🏗️ Equipment / EPC Diligence',
+                "🏗️ Equipment / EPC Diligence",
                 expanded=False
             ):
 
@@ -6632,25 +6708,24 @@ with dashboard_tab:
                                 col
                             )
                         )
-                        or 'N/A'
+                        or "N/A"
+
                     for col
                     in available_diligence_columns
                 }
 
-                diligence_df = (
-                    pd.DataFrame(
-                        {
-                            'Field':
-                                list(
-                                    diligence_data.keys()
-                                ),
+                diligence_df = pd.DataFrame(
+                    {
+                        "Field":
+                            list(
+                                diligence_data.keys()
+                            ),
 
-                            'Value':
-                                list(
-                                    diligence_data.values()
-                                )
-                        }
-                    )
+                        "Value":
+                            list(
+                                diligence_data.values()
+                            )
+                    }
                 )
 
                 st.dataframe(
@@ -6660,30 +6735,32 @@ with dashboard_tab:
                 )
 
                 st.caption(
-                    'Equipment manufacturer, model, '
-                    'EPC and integrator data may help '
-                    'prioritize Domestic Content diligence '
-                    'but are not treated as proof of '
-                    'Domestic Content qualification.'
+                    "Equipment manufacturer, model, "
+                    "EPC and integrator data may help "
+                    "prioritize Domestic Content diligence "
+                    "but are not treated as proof of "
+                    "Domestic Content qualification."
                 )
 
         if available_interconnection_columns:
 
             with st.expander(
-                '🔌 Interconnection Snapshot',
+                "🔌 Interconnection Snapshot",
                 expanded=False
             ):
 
                 ix_fields = [
-                    'Queue ID',
-                    'Point of Interconnection',
+                    "Queue ID",
+                    "Point of Interconnection",
                     *available_interconnection_columns
                 ]
 
                 ix_fields = [
                     col
+
                     for col
                     in ix_fields
+
                     if col
                     in project.index
                 ]
@@ -6695,7 +6772,8 @@ with dashboard_tab:
                                 col
                             )
                         )
-                        or 'N/A'
+                        or "N/A"
+
                     for col
                     in ix_fields
                 }
@@ -6703,12 +6781,12 @@ with dashboard_tab:
                 st.dataframe(
                     pd.DataFrame(
                         {
-                            'Field':
+                            "Field":
                                 list(
                                     ix_data.keys()
                                 ),
 
-                            'Value':
+                            "Value":
                                 list(
                                     ix_data.values()
                                 )
@@ -6719,13 +6797,10 @@ with dashboard_tab:
                 )
 
         st.markdown(
-            '#### Management Readout'
+            "#### Management Readout"
         )
 
-        (
-            r1,
-            r2
-        ) = st.columns(
+        r1, r2 = st.columns(
             2
         )
 
@@ -6742,33 +6817,33 @@ with dashboard_tab:
     st.divider()
 
     st.subheader(
-        'Owner Opportunity Summary'
+        "Owner Opportunity Summary"
     )
 
     owner_summary = (
         df.groupby(
-            'Owner',
+            "Owner",
             as_index=False
         )
         .agg(
             Projects=(
-                'Power Project Name',
-                'count'
+                "Power Project Name",
+                "count"
             ),
 
             MW=(
-                'Capacity (MW)',
-                'sum'
+                "Capacity (MW)",
+                "sum"
             ),
 
             Average_Score=(
-                'Opportunity Score',
-                'mean'
+                "Opportunity Score",
+                "mean"
             ),
 
             Best_Score=(
-                'Opportunity Score',
-                'max'
+                "Opportunity Score",
+                "max"
             )
         )
     )
@@ -6777,8 +6852,8 @@ with dashboard_tab:
         owner_summary
         .sort_values(
             by=[
-                'Best_Score',
-                'Average_Score'
+                "Best_Score",
+                "Average_Score"
             ],
             ascending=[
                 False,
@@ -6790,11 +6865,11 @@ with dashboard_tab:
     owner_summary_display = (
         owner_summary.rename(
             columns={
-                'Average_Score':
-                    'Average Score',
+                "Average_Score":
+                    "Average Score",
 
-                'Best_Score':
-                    'Best Score'
+                "Best_Score":
+                    "Best Score"
             }
         )
     )
@@ -6806,18 +6881,18 @@ with dashboard_tab:
         use_container_width=True,
         hide_index=True,
         column_config={
-            'Average Score':
+            "Average Score":
                 st.column_config.NumberColumn(
-                    'Average Score',
-                    format='%.1f'
+                    "Average Score",
+                    format="%.1f"
                 ),
 
-            'Best Score':
+            "Best Score":
                 st.column_config.ProgressColumn(
-                    'Best Score',
+                    "Best Score",
                     min_value=0,
                     max_value=100,
-                    format='%.1f'
+                    format="%.1f"
                 )
         }
     )
@@ -6829,48 +6904,54 @@ with dashboard_tab:
             index=False
         )
         .encode(
-            'utf-8'
+            "utf-8"
         )
     )
 
     st.download_button(
-        '⬇️ Download Scored ERCOT Universe',
+        "⬇️ Download Scored ERCOT Universe",
         data=csv,
         file_name=
-            'ERCOT_Scored_Acquisition_Universe.csv',
-        mime='text/csv'
+            "ERCOT_Scored_Acquisition_Universe.csv",
+        mime="text/csv"
     )
 
 
+# ============================================================
+# ERCOT COMPETITOR DUE DILIGENCE
+# ============================================================
 with competitor_tab:
 
     st.markdown(
-        '## 🎯 ERCOT Competitor Due Diligence'
+        "## 🎯 ERCOT Competitor Due Diligence"
     )
 
     st.caption(
-        'Project Orbit competitive screen using '
-        'the current Orennia project universe. '
-        'The default competitor definition is '
-        '**Storage / BESS in ERCOT South with '
-        '250–700 MW of capacity**, inclusive. '
-        'Project Orbit and its prior Gunsight name '
-        'are treated as the reference project and '
-        'are excluded from the competitor list.'
+        "Project Orbit competitive screen using "
+        "the current Orennia project universe. "
+        "The competitor definition is **Storage / "
+        "BESS in ERCOT South**. The size filter "
+        "defaults to **250–700 MW**, but you can "
+        "type **any minimum and maximum MW values** "
+        "you want. Project Orbit and its prior "
+        "Gunsight name are treated as the reference "
+        "project and are excluded from the "
+        "competitor list."
     )
 
     st.info(
-        'This tab is a competitive-landscape screen, '
-        'not an acquisition ranking. It intentionally '
-        'uses the full cleaned Orennia universe before '
+        "This tab is a competitive-landscape screen, "
+        "not an acquisition ranking. It intentionally "
+        "uses the full cleaned Orennia universe before "
         "the main dashboard's acquisition exclusions "
-        'are applied.'
+        "are applied."
     )
 
     ORBIT_PROJECT_ALIASES = [
-        'orbit',
-        'gunsight'
+        "orbit",
+        "gunsight"
     ]
+
 
     def _orbit_name_mask(
         frame
@@ -6878,10 +6959,10 @@ with competitor_tab:
 
         project_names = (
             frame[
-                'Power Project Name'
+                "Power Project Name"
             ]
             .fillna(
-                ''
+                ""
             )
             .astype(
                 str
@@ -6908,12 +6989,329 @@ with competitor_tab:
 
         return mask
 
+
+    # --------------------------------------------------------
+    # QUEUE PLACEMENT HELPERS
+    # --------------------------------------------------------
+    def _queue_stage(
+        row
+    ):
+
+        status = clean_text(
+            row.get(
+                "Power Project Status"
+            )
+        )
+
+        detailed = clean_text(
+            row.get(
+                "Detailed Status"
+            )
+        )
+
+        combined = (
+            status
+            + " "
+            + detailed
+        ).lower()
+
+        if status in [
+            "Inactive",
+            "Suspended",
+            "Retired"
+        ]:
+
+            return (
+                "Inactive / Suspended / Retired",
+                90
+            )
+
+        if (
+            status == "Operating"
+            or
+            "construction complete"
+            in combined
+        ):
+
+            return (
+                "Operating / Complete",
+                10
+            )
+
+        if (
+            status == "In Construction"
+            or
+            "in construction"
+            in combined
+            or
+            "more than 50%"
+            in combined
+            or
+            ">50%"
+            in combined
+        ):
+
+            return (
+                "In Construction",
+                20
+            )
+
+        if (
+            status == "IA Executed"
+            or
+            "ia executed"
+            in combined
+            or
+            ", ia"
+            in combined
+        ):
+
+            return (
+                "IA Executed",
+                30
+            )
+
+        if (
+            "fis completed"
+            in combined
+            or
+            "fis complete"
+            in combined
+        ):
+
+            return (
+                "FIS Completed",
+                40
+            )
+
+        if (
+            "fis started"
+            in combined
+            or
+            "fis start"
+            in combined
+        ):
+
+            return (
+                "FIS Started",
+                50
+            )
+
+        if (
+            status == "Pre-Study"
+            or
+            "pre-study"
+            in combined
+            or
+            "pre study"
+            in combined
+        ):
+
+            return (
+                "Pre-Study",
+                70
+            )
+
+        if (
+            "study"
+            in combined
+            or
+            "studies"
+            in combined
+        ):
+
+            return (
+                "Studies Undergoing / Other",
+                60
+            )
+
+        return (
+            "Other / Unknown",
+            80
+        )
+
+
+    def _queue_cycle_sort_value(
+        value
+    ):
+
+        text = clean_text(
+            value
+        )
+
+        if not text:
+
+            return np.nan
+
+        year_match = re.search(
+            "\\b(20\\d{2})\\b",
+            text
+        )
+
+        if year_match:
+
+            return float(
+                year_match.group(
+                    1
+                )
+            )
+
+        number_match = re.search(
+            "\\d+(?:\\.\\d+)?",
+            text
+        )
+
+        if number_match:
+
+            try:
+
+                return float(
+                    number_match.group(
+                        0
+                    )
+                )
+
+            except Exception:
+
+                return np.nan
+
+        return np.nan
+
+
+    def _queue_project_key(
+        row
+    ):
+
+        return (
+            clean_text(
+                row.get(
+                    "Power Project Name"
+                )
+            )
+            + "|"
+            + clean_text(
+                row.get(
+                    "Owner"
+                )
+            )
+            + "|"
+            + clean_text(
+                row.get(
+                    "Queue ID"
+                )
+            )
+        ).lower()
+
+
+    def _add_queue_metadata(
+        frame,
+        reference_type="Competitor"
+    ):
+
+        result = frame.copy()
+
+        result[
+            "Queue Reference"
+        ] = reference_type
+
+        result[
+            "Queue Project Key"
+        ] = result.apply(
+            _queue_project_key,
+            axis=1
+        )
+
+        if result.empty:
+
+            result[
+                "Queue Stage"
+            ] = pd.Series(
+                dtype="object"
+            )
+
+            result[
+                "Queue Stage Rank"
+            ] = pd.Series(
+                dtype="float64"
+            )
+
+        else:
+
+            queue_stage_data = result.apply(
+                lambda row:
+                    pd.Series(
+                        _queue_stage(
+                            row
+                        ),
+                        index=[
+                            "Queue Stage",
+                            "Queue Stage Rank"
+                        ]
+                    ),
+                axis=1
+            )
+
+            result[
+                "Queue Stage"
+            ] = queue_stage_data[
+                "Queue Stage"
+            ]
+
+            result[
+                "Queue Stage Rank"
+            ] = pd.to_numeric(
+                queue_stage_data[
+                    "Queue Stage Rank"
+                ],
+                errors="coerce"
+            )
+
+        if "Queue Date" in result.columns:
+
+            result[
+                "Queue Date Parsed"
+            ] = pd.to_datetime(
+                result[
+                    "Queue Date"
+                ],
+                errors="coerce"
+            )
+
+        else:
+
+            result[
+                "Queue Date Parsed"
+            ] = pd.NaT
+
+        if "Queue Cycle" in result.columns:
+
+            result[
+                "Queue Cycle Sort"
+            ] = result[
+                "Queue Cycle"
+            ].apply(
+                _queue_cycle_sort_value
+            )
+
+        else:
+
+            result[
+                "Queue Cycle Sort"
+            ] = np.nan
+
+        return result
+
+
+    # --------------------------------------------------------
+    # PROJECT ORBIT REFERENCE
+    # --------------------------------------------------------
     orbit_reference_candidates = (
         competitor_source[
             _orbit_name_mask(
                 competitor_source
             )
-        ].copy()
+        ]
+        .copy()
     )
 
     if not orbit_reference_candidates.empty:
@@ -6922,14 +7320,14 @@ with competitor_tab:
             orbit_reference_candidates
             .sort_values(
                 by=[
-                    'Capacity (MW)',
-                    'First Power Date'
+                    "Capacity (MW)",
+                    "First Power Date"
                 ],
                 ascending=[
                     False,
                     True
                 ],
-                na_position='last'
+                na_position="last"
             )
         )
 
@@ -6947,12 +7345,12 @@ with competitor_tab:
 
         orbit_reference_label = (
             st.selectbox(
-                'Project Orbit reference',
+                "Project Orbit reference",
                 options=
                     orbit_reference_labels,
                 index=0,
                 key=
-                    'orbit_competitor_reference'
+                    "orbit_competitor_reference"
             )
         )
 
@@ -6965,66 +7363,60 @@ with competitor_tab:
             ]
         )
 
-        (
-            o1,
-            o2,
-            o3,
-            o4,
-            o5
-        ) = st.columns(
+        o1, o2, o3, o4, o5 = st.columns(
             5
         )
 
         o1.metric(
-            'Orbit Reference',
+            "Orbit Reference",
             clean_text(
                 orbit_reference.get(
-                    'Power Project Name'
+                    "Power Project Name"
                 )
             )
-            or 'N/A'
+            or "N/A"
         )
 
         o2.metric(
-            'Capacity',
+            "Capacity",
             (
                 f"{orbit_reference['Capacity (MW)']:,.0f} MW"
                 if pd.notna(
                     orbit_reference.get(
-                        'Capacity (MW)'
+                        "Capacity (MW)"
                     )
                 )
-                else 'N/A'
+                else "N/A"
             )
         )
 
         o3.metric(
-            'Status',
+            "Status",
             clean_text(
                 orbit_reference.get(
-                    'Power Project Status'
+                    "Power Project Status"
                 )
             )
-            or 'N/A'
+            or "N/A"
         )
 
         o4.metric(
-            'COD',
+            "COD",
             format_date(
                 orbit_reference.get(
-                    'First Power Date'
+                    "First Power Date"
                 )
             )
         )
 
         o5.metric(
-            'County',
+            "County",
             clean_text(
                 orbit_reference.get(
-                    'County'
+                    "County"
                 )
             )
-            or 'N/A'
+            or "N/A"
         )
 
     else:
@@ -7034,34 +7426,32 @@ with competitor_tab:
         st.caption(
             "No project with 'Orbit' or "
             "'Gunsight' in the Orennia project "
-            'name was found. The competitor '
-            'universe below still works normally.'
+            "name was found. The competitor "
+            "universe below still works normally."
         )
 
+
+    # --------------------------------------------------------
+    # BASE COMPETITOR UNIVERSE
+    #
+    # IMPORTANT:
+    # NO HARD-CODED MW LIMIT HERE.
+    # MW is filtered dynamically below.
+    # --------------------------------------------------------
     competitor_base = (
         competitor_source[
             (
                 competitor_source[
-                    'ERCOT Area'
+                    "ERCOT Area"
                 ]
-                == 'ERCOT-S'
+                == "ERCOT-S"
             )
             &
             (
                 competitor_source[
-                    'Power Project Type'
+                    "Power Project Type"
                 ]
-                == 'Storage'
-            )
-            &
-            (
-                competitor_source[
-                    'Capacity (MW)'
-                ].between(
-                    250,
-                    700,
-                    inclusive='both'
-                )
+                == "Storage"
             )
             &
             (
@@ -7076,37 +7466,39 @@ with competitor_tab:
     if competitor_base.empty:
 
         st.warning(
-            'No ERCOT South storage projects '
-            'between 250 MW and 700 MW were '
-            'found in the active Orennia file.'
+            "No ERCOT South storage projects "
+            "were found in the active Orennia file."
         )
 
     else:
 
         st.markdown(
-            '### Competitor Universe'
+            "### Competitor Universe"
         )
 
         (
             filter_1,
             filter_2,
             filter_3,
-            filter_4
+            filter_4,
+            filter_5
         ) = st.columns(
             [
                 1.15,
                 1.25,
                 1.10,
-                1
+                0.8,
+                0.8
             ]
         )
 
         competitor_status_options = sorted(
             [
                 value
+
                 for value
                 in competitor_base[
-                    'Power Project Status'
+                    "Power Project Status"
                 ]
                 .dropna()
                 .astype(
@@ -7114,6 +7506,7 @@ with competitor_tab:
                 )
                 .unique()
                 .tolist()
+
                 if clean_text(
                     value
                 )
@@ -7124,31 +7517,33 @@ with competitor_tab:
 
             competitor_status_filter = (
                 st.multiselect(
-                    'Project Status',
+                    "Project Status",
                     options=
                         competitor_status_options,
                     default=
                         competitor_status_options,
                     key=
-                        'orbit_competitor_status_filter'
+                        "orbit_competitor_status_filter"
                 )
             )
 
         competitor_owner_options = sorted(
             [
                 value
+
                 for value
                 in competitor_base[
-                    'Owner'
+                    "Owner"
                 ]
                 .fillna(
-                    ''
+                    ""
                 )
                 .astype(
                     str
                 )
                 .unique()
                 .tolist()
+
                 if clean_text(
                     value
                 )
@@ -7159,14 +7554,14 @@ with competitor_tab:
 
             competitor_owner_filter = (
                 st.multiselect(
-                    'Owner / Developer',
+                    "Owner / Developer",
                     options=
                         competitor_owner_options,
                     default=[],
                     placeholder=
-                        'All owners',
+                        "All owners",
                     key=
-                        'orbit_competitor_owner_filter'
+                        "orbit_competitor_owner_filter"
                 )
             )
 
@@ -7174,9 +7569,10 @@ with competitor_tab:
             sorted(
                 [
                     value
+
                     for value
                     in competitor_base[
-                        'County'
+                        "County"
                     ]
                     .dropna()
                     .astype(
@@ -7184,13 +7580,16 @@ with competitor_tab:
                     )
                     .unique()
                     .tolist()
+
                     if clean_text(
                         value
                     )
                 ]
             )
-            if 'County'
+
+            if "County"
             in competitor_base.columns
+
             else []
         )
 
@@ -7198,14 +7597,14 @@ with competitor_tab:
 
             competitor_county_filter = (
                 st.multiselect(
-                    'County',
+                    "County",
                     options=
                         competitor_county_options,
                     default=[],
                     placeholder=
-                        'All counties',
+                        "All counties",
                     key=
-                        'orbit_competitor_county_filter',
+                        "orbit_competitor_county_filter",
                     disabled=
                         (
                             len(
@@ -7216,20 +7615,37 @@ with competitor_tab:
                 )
             )
 
+        # ----------------------------------------------------
+        # FLEXIBLE MW FILTER
+        # User can type any MW range.
+        # ----------------------------------------------------
         with filter_4:
 
-            competitor_capacity_range = (
-                st.slider(
-                    'Capacity Range (MW)',
-                    min_value=250,
-                    max_value=700,
-                    value=(
-                        250,
-                        700
-                    ),
-                    step=25,
+            competitor_min_mw = (
+                st.number_input(
+                    "Min MW",
+                    min_value=0.0,
+                    value=250.0,
+                    step=1.0,
                     key=
-                        'orbit_competitor_capacity_range'
+                        "orbit_competitor_min_mw",
+                    help=
+                        "Type any minimum project size in MW."
+                )
+            )
+
+        with filter_5:
+
+            competitor_max_mw = (
+                st.number_input(
+                    "Max MW",
+                    min_value=0.0,
+                    value=700.0,
+                    step=1.0,
+                    key=
+                        "orbit_competitor_max_mw",
+                    help=
+                        "Type any maximum project size in MW."
                 )
             )
 
@@ -7242,7 +7658,7 @@ with competitor_tab:
             competitor_view = (
                 competitor_view[
                     competitor_view[
-                        'Power Project Status'
+                        "Power Project Status"
                     ].isin(
                         competitor_status_filter
                     )
@@ -7263,7 +7679,7 @@ with competitor_tab:
             competitor_view = (
                 competitor_view[
                     competitor_view[
-                        'Owner'
+                        "Owner"
                     ].isin(
                         competitor_owner_filter
                     )
@@ -7272,14 +7688,15 @@ with competitor_tab:
 
         if (
             competitor_county_filter
-            and 'County'
+            and
+            "County"
             in competitor_view.columns
         ):
 
             competitor_view = (
                 competitor_view[
                     competitor_view[
-                        'County'
+                        "County"
                     ]
                     .astype(
                         str
@@ -7290,19 +7707,146 @@ with competitor_tab:
                 ]
             )
 
-        competitor_view = (
-            competitor_view[
+        if (
+            competitor_max_mw
+            < competitor_min_mw
+        ):
+
+            st.error(
+                "Max MW must be greater than "
+                "or equal to Min MW."
+            )
+
+            competitor_view = (
+                competitor_view
+                .iloc[
+                    0:0
+                ]
+                .copy()
+            )
+
+        else:
+
+            competitor_view = (
                 competitor_view[
-                    'Capacity (MW)'
-                ].between(
-                    competitor_capacity_range[0],
-                    competitor_capacity_range[1],
-                    inclusive='both'
-                )
-            ]
-            .copy()
+                    competitor_view[
+                        "Capacity (MW)"
+                    ].between(
+                        competitor_min_mw,
+                        competitor_max_mw,
+                        inclusive="both"
+                    )
+                ]
+                .copy()
+            )
+
+
+        # ----------------------------------------------------
+        # FILTERED QUEUE PLACEMENT
+        # ----------------------------------------------------
+        competitor_view = (
+            _add_queue_metadata(
+                competitor_view,
+                reference_type="Competitor"
+            )
         )
 
+        queue_frames = [
+            competitor_view.copy()
+        ]
+
+        if orbit_reference is not None:
+
+            orbit_queue_row = pd.DataFrame(
+                [
+                    orbit_reference.to_dict()
+                ]
+            )
+
+            orbit_queue_row = (
+                _add_queue_metadata(
+                    orbit_queue_row,
+                    reference_type=
+                        "Project Orbit"
+                )
+            )
+
+            queue_frames.append(
+                orbit_queue_row
+            )
+
+        queue_comparison = pd.concat(
+            queue_frames,
+            ignore_index=True,
+            sort=False
+        )
+
+        queue_comparison = (
+            queue_comparison
+            .sort_values(
+                by=[
+                    "Queue Stage Rank",
+                    "Queue Date Parsed",
+                    "Queue Cycle Sort",
+                    "First Power Date",
+                    "Capacity (MW)"
+                ],
+                ascending=[
+                    True,
+                    True,
+                    True,
+                    True,
+                    False
+                ],
+                na_position="last"
+            )
+            .reset_index(
+                drop=True
+            )
+        )
+
+        queue_comparison[
+            "Filtered Queue Placement"
+        ] = np.arange(
+            1,
+            len(
+                queue_comparison
+            ) + 1
+        )
+
+        competitor_queue_lookup = (
+            queue_comparison[
+                queue_comparison[
+                    "Queue Reference"
+                ]
+                == "Competitor"
+            ]
+            .drop_duplicates(
+                subset=[
+                    "Queue Project Key"
+                ],
+                keep="first"
+            )
+            .set_index(
+                "Queue Project Key"
+            )[
+                "Filtered Queue Placement"
+            ]
+            .to_dict()
+        )
+
+        competitor_view[
+            "Filtered Queue Placement"
+        ] = competitor_view[
+            "Queue Project Key"
+        ].map(
+            competitor_queue_lookup
+        )
+
+
+        # ----------------------------------------------------
+        # ORBIT SIZE COMPARISON
+        # ----------------------------------------------------
         orbit_capacity = np.nan
 
         if orbit_reference is not None:
@@ -7312,11 +7856,11 @@ with competitor_tab:
                     pd.Series(
                         [
                             orbit_reference.get(
-                                'Capacity (MW)'
+                                "Capacity (MW)"
                             )
                         ]
                     ),
-                    errors='coerce'
+                    errors="coerce"
                 )
                 .iloc[0]
             )
@@ -7326,19 +7870,19 @@ with competitor_tab:
         ):
 
             competitor_view[
-                'MW Delta vs Orbit'
+                "MW Delta vs Orbit"
             ] = (
                 competitor_view[
-                    'Capacity (MW)'
+                    "Capacity (MW)"
                 ]
                 - orbit_capacity
             )
 
             competitor_view[
-                'Absolute MW Delta vs Orbit'
+                "Absolute MW Delta vs Orbit"
             ] = (
                 competitor_view[
-                    'MW Delta vs Orbit'
+                    "MW Delta vs Orbit"
                 ].abs()
             )
 
@@ -7346,16 +7890,16 @@ with competitor_tab:
                 competitor_view
                 .sort_values(
                     by=[
-                        'Absolute MW Delta vs Orbit',
-                        'First Power Date',
-                        'Capacity (MW)'
+                        "Absolute MW Delta vs Orbit",
+                        "First Power Date",
+                        "Capacity (MW)"
                     ],
                     ascending=[
                         True,
                         True,
                         False
                     ],
-                    na_position='last'
+                    na_position="last"
                 )
             )
 
@@ -7365,123 +7909,339 @@ with competitor_tab:
                 competitor_view
                 .sort_values(
                     by=[
-                        'Capacity (MW)',
-                        'First Power Date'
+                        "Capacity (MW)",
+                        "First Power Date"
                     ],
                     ascending=[
                         False,
                         True
                     ],
-                    na_position='last'
+                    na_position="last"
                 )
             )
 
-        (
-            c1,
-            c2,
-            c3,
-            c4,
-            c5
-        ) = st.columns(
+
+        # ----------------------------------------------------
+        # KPIs
+        # ----------------------------------------------------
+        c1, c2, c3, c4, c5 = st.columns(
             5
         )
 
         c1.metric(
-            'Competitor Projects',
-            f'{len(competitor_view):,}'
+            "Competitor Projects",
+            f"{len(competitor_view):,}"
         )
 
         c2.metric(
-            'Competitor Capacity',
+            "Competitor Capacity",
             f"{competitor_view['Capacity (MW)'].sum():,.0f} MW"
         )
 
         c3.metric(
-            'Average Project Size',
+            "Average Project Size",
             (
                 f"{competitor_view['Capacity (MW)'].mean():,.0f} MW"
                 if not competitor_view.empty
-                else 'N/A'
+                else "N/A"
             )
         )
 
         c4.metric(
-            'Owners / Developers',
+            "Owners / Developers",
             f"{competitor_view['Owner'].replace('', np.nan).nunique():,}"
         )
 
         advanced_competitor_count = int(
             competitor_view[
-                'Power Project Status'
+                "Power Project Status"
             ].isin(
                 [
-                    'Operating',
-                    'In Construction',
-                    'IA Executed'
+                    "Operating",
+                    "In Construction",
+                    "IA Executed"
                 ]
             ).sum()
         )
 
         c5.metric(
-            'Operating / Advanced',
-            f'{advanced_competitor_count:,}'
+            "Operating / Advanced",
+            f"{advanced_competitor_count:,}"
         )
 
         st.caption(
-            f'Active source: '
-            f'**{active_data_source}** | '
-            'Fixed market: **ERCOT-S** | '
-            'Technology: **Storage** | '
-            'Base size screen: **250–700 MW**.'
+            f"Active source: **{active_data_source}** | "
+            "Fixed market: **ERCOT-S** | "
+            "Technology: **Storage** | "
+            f"Active size screen: "
+            f"**{competitor_min_mw:,.0f}–"
+            f"{competitor_max_mw:,.0f} MW**."
         )
+
+
+        # ----------------------------------------------------
+        # FILTERED QUEUE PLACEMENT
+        # ----------------------------------------------------
+        st.divider()
+
+        st.markdown(
+            "### 🔌 Filtered Interconnection Queue Placement"
+        )
+
+        st.caption(
+            "Relative placement among the currently "
+            "filtered competitors, with Project Orbit "
+            "added as a reference when available. More "
+            "advanced interconnection / development "
+            "status ranks first; earlier queue dates, "
+            "earlier queue cycles and earlier CODs are "
+            "used as tiebreakers. This is a diligence "
+            "ranking derived from the Orennia fields in "
+            "the active file, not an official ERCOT "
+            "queue priority."
+        )
+
+        orbit_queue_rows = (
+            queue_comparison[
+                queue_comparison[
+                    "Queue Reference"
+                ]
+                == "Project Orbit"
+            ]
+        )
+
+        orbit_queue_position = np.nan
+        projects_ahead_of_orbit = np.nan
+        projects_behind_orbit = np.nan
+
+        if not orbit_queue_rows.empty:
+
+            orbit_queue_position = int(
+                orbit_queue_rows[
+                    "Filtered Queue Placement"
+                ].iloc[0]
+            )
+
+            projects_ahead_of_orbit = (
+                orbit_queue_position
+                - 1
+            )
+
+            projects_behind_orbit = (
+                len(
+                    queue_comparison
+                )
+                - orbit_queue_position
+            )
+
+        queue_leader = (
+            clean_text(
+                queue_comparison[
+                    "Power Project Name"
+                ].iloc[0]
+            )
+            if not queue_comparison.empty
+            else "N/A"
+        )
+
+        q1, q2, q3, q4 = st.columns(
+            4
+        )
+
+        q1.metric(
+            "Orbit Queue Placement",
+            (
+                f"#{orbit_queue_position} "
+                f"of {len(queue_comparison)}"
+
+                if pd.notna(
+                    orbit_queue_position
+                )
+
+                else "N/A"
+            )
+        )
+
+        q2.metric(
+            "Projects Ahead of Orbit",
+            (
+                f"{int(projects_ahead_of_orbit):,}"
+
+                if pd.notna(
+                    projects_ahead_of_orbit
+                )
+
+                else "N/A"
+            )
+        )
+
+        q3.metric(
+            "Projects Behind Orbit",
+            (
+                f"{int(projects_behind_orbit):,}"
+
+                if pd.notna(
+                    projects_behind_orbit
+                )
+
+                else "N/A"
+            )
+        )
+
+        q4.metric(
+            "Filtered Queue Leader",
+            queue_leader
+        )
+
+        queue_table_columns = [
+            "Filtered Queue Placement",
+            "Queue Reference",
+            "Power Project Name",
+            "Owner",
+            "County",
+            "Capacity (MW)",
+            "Queue Stage",
+            "Queue ID",
+            "Queue Cycle",
+            "Queue Date Parsed",
+            "Point of Interconnection",
+            "First Power Date"
+        ]
+
+        queue_table_columns = [
+            column
+
+            for column
+            in queue_table_columns
+
+            if column
+            in queue_comparison.columns
+        ]
+
+        queue_table = (
+            queue_comparison[
+                queue_table_columns
+            ]
+            .copy()
+        )
+
+        queue_table = (
+            queue_table.rename(
+                columns={
+                    "Queue Date Parsed":
+                        "Queue Date",
+
+                    "First Power Date":
+                        "COD"
+                }
+            )
+        )
+
+        st.dataframe(
+            queue_table,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Filtered Queue Placement":
+                    st.column_config.NumberColumn(
+                        "Queue Placement",
+                        format="#%d"
+                    ),
+
+                "Capacity (MW)":
+                    st.column_config.NumberColumn(
+                        "Capacity (MW)",
+                        format="%.0f"
+                    ),
+
+                "Queue Date":
+                    st.column_config.DateColumn(
+                        "Queue Date"
+                    ),
+
+                "COD":
+                    st.column_config.DateColumn(
+                        "COD"
+                    )
+            }
+        )
+
+        with st.expander(
+            "How filtered queue placement is calculated",
+            expanded=False
+        ):
+
+            st.markdown(
+                "**Ranking order:** "
+                "Operating / Complete → "
+                "In Construction → "
+                "IA Executed → "
+                "FIS Completed → "
+                "FIS Started → "
+                "Studies Undergoing / Other → "
+                "Pre-Study → "
+                "Other / Unknown → "
+                "Inactive / Suspended / Retired. "
+                "Within the same stage, earlier "
+                "Queue Date ranks first, then earlier "
+                "Queue Cycle, then earlier COD. "
+                "Orbit is always added as a reference "
+                "when a matching Orbit / Gunsight "
+                "row exists."
+            )
+
 
         if competitor_view.empty:
 
             st.warning(
-                'No competitors match the '
-                'current tab filters.'
+                "No competitors match the "
+                "current tab filters."
             )
 
         else:
 
+            # ------------------------------------------------
+            # MAP
+            # ------------------------------------------------
             st.divider()
 
             st.markdown(
-                '### Competitor Map'
+                "### Competitor Map"
             )
 
             st.caption(
-                'Blue markers are ERCOT South BESS '
-                'competitors in the selected size range. '
-                'The orange marker is Project Orbit / '
-                'Gunsight when a matching Orennia row '
-                'with valid coordinates is available.'
+                "Blue markers are ERCOT South BESS "
+                "competitors in the active MW range. "
+                "The orange marker is Project Orbit / "
+                "Gunsight when a matching Orennia row "
+                "with valid coordinates is available."
             )
 
             competitor_lat_col = (
-                'Latitude (Degrees)'
-                if 'Latitude (Degrees)'
+                "Latitude (Degrees)"
+                if "Latitude (Degrees)"
                 in competitor_view.columns
                 else None
             )
 
             competitor_lon_col = (
-                'Longitude (Degrees)'
-                if 'Longitude (Degrees)'
+                "Longitude (Degrees)"
+                if "Longitude (Degrees)"
                 in competitor_view.columns
                 else None
             )
 
             if (
                 competitor_lat_col is None
-                or competitor_lon_col is None
+                or
+                competitor_lon_col is None
             ):
 
                 st.info(
-                    'The active Orennia file does not '
-                    'include latitude / longitude fields, '
-                    'so the competitor list is available '
-                    'but the map cannot be rendered.'
+                    "The active Orennia file does not "
+                    "include latitude / longitude fields, "
+                    "so the competitor list is available "
+                    "but the map cannot be rendered."
                 )
 
             else:
@@ -7491,52 +8251,52 @@ with competitor_tab:
                 )
 
                 competitor_map[
-                    'lat'
+                    "lat"
                 ] = pd.to_numeric(
                     competitor_map[
                         competitor_lat_col
                     ],
-                    errors='coerce'
+                    errors="coerce"
                 )
 
                 competitor_map[
-                    'lon'
+                    "lon"
                 ] = pd.to_numeric(
                     competitor_map[
                         competitor_lon_col
                     ],
-                    errors='coerce'
+                    errors="coerce"
                 )
 
                 competitor_map = (
                     competitor_map[
                         competitor_map[
-                            'lat'
+                            "lat"
                         ].between(
                             24.0,
                             37.5,
-                            inclusive='both'
+                            inclusive="both"
                         )
                         &
                         competitor_map[
-                            'lon'
+                            "lon"
                         ].between(
                             -107.5,
                             -92.0,
-                            inclusive='both'
+                            inclusive="both"
                         )
                     ]
                     .copy()
                 )
 
                 competitor_map[
-                    'Project'
+                    "Project"
                 ] = (
                     competitor_map[
-                        'Power Project Name'
+                        "Power Project Name"
                     ]
                     .fillna(
-                        ''
+                        ""
                     )
                     .astype(
                         str
@@ -7544,44 +8304,44 @@ with competitor_tab:
                 )
 
                 competitor_map[
-                    'Owner Display'
+                    "Owner Display"
                 ] = (
                     competitor_map[
-                        'Owner'
+                        "Owner"
                     ]
                     .replace(
-                        '',
+                        "",
                         np.nan
                     )
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                 )
 
                 competitor_map[
-                    'Capacity Display'
+                    "Capacity Display"
                 ] = (
                     competitor_map[
-                        'Capacity (MW)'
+                        "Capacity (MW)"
                     ]
                     .apply(
                         lambda value:
-                            f'{value:,.0f} MW'
+                            f"{value:,.0f} MW"
                             if pd.notna(
                                 value
                             )
-                            else 'N/A'
+                            else "N/A"
                     )
                 )
 
                 competitor_map[
-                    'Status Display'
+                    "Status Display"
                 ] = (
                     competitor_map[
-                        'Power Project Status'
+                        "Power Project Status"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
@@ -7589,64 +8349,70 @@ with competitor_tab:
                 )
 
                 competitor_map[
-                    'Detailed Status Display'
+                    "Detailed Status Display"
                 ] = (
                     competitor_map[
-                        'Detailed Status'
+                        "Detailed Status"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
                     )
-                    if 'Detailed Status'
+
+                    if "Detailed Status"
                     in competitor_map.columns
-                    else 'N/A'
+
+                    else "N/A"
                 )
 
                 competitor_map[
-                    'County Display'
+                    "County Display"
                 ] = (
                     competitor_map[
-                        'County'
+                        "County"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
                     )
-                    if 'County'
+
+                    if "County"
                     in competitor_map.columns
-                    else 'N/A'
+
+                    else "N/A"
                 )
 
                 competitor_map[
-                    'POI Display'
+                    "POI Display"
                 ] = (
                     competitor_map[
-                        'Point of Interconnection'
+                        "Point of Interconnection"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
                     )
-                    if 'Point of Interconnection'
+
+                    if "Point of Interconnection"
                     in competitor_map.columns
-                    else 'N/A'
+
+                    else "N/A"
                 )
 
                 competitor_map[
-                    'Queue Display'
+                    "Queue Display"
                 ] = (
                     competitor_map[
-                        'Queue ID'
+                        "Queue ID"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
@@ -7654,10 +8420,10 @@ with competitor_tab:
                 )
 
                 competitor_map[
-                    'COD Display'
+                    "COD Display"
                 ] = (
                     competitor_map[
-                        'First Power Date'
+                        "First Power Date"
                     ]
                     .apply(
                         format_date
@@ -7665,21 +8431,23 @@ with competitor_tab:
                 )
 
                 competitor_map[
-                    'Marker Type'
-                ] = 'Competitor'
+                    "Marker Type"
+                ] = "Competitor"
 
+                # Marker scaling now supports projects
+                # outside the former 250–700 MW range.
                 competitor_map[
-                    'Map Radius'
+                    "Map Radius"
                 ] = (
                     competitor_map[
-                        'Capacity (MW)'
+                        "Capacity (MW)"
                     ]
                     .fillna(
-                        250
+                        50
                     )
                     .clip(
-                        lower=250,
-                        upper=700
+                        lower=20,
+                        upper=5000
                     )
                     * 60
                 )
@@ -7690,15 +8458,15 @@ with competitor_tab:
 
                     competitor_layers.append(
                         pdk.Layer(
-                            'ScatterplotLayer',
+                            "ScatterplotLayer",
                             data=
                                 competitor_map,
                             id=
-                                'orbit_competitors',
+                                "orbit_competitors",
                             get_position=
-                                '[lon, lat]',
+                                "[lon, lat]",
                             get_radius=
-                                'Map Radius',
+                                "Map Radius",
                             get_fill_color=[
                                 38,
                                 132,
@@ -7734,7 +8502,7 @@ with competitor_tab:
                                     )
                                 ]
                             ),
-                            errors='coerce'
+                            errors="coerce"
                         )
                         .iloc[0]
                     )
@@ -7748,7 +8516,7 @@ with competitor_tab:
                                     )
                                 ]
                             ),
-                            errors='coerce'
+                            errors="coerce"
                         )
                         .iloc[0]
                     )
@@ -7757,15 +8525,18 @@ with competitor_tab:
                         pd.notna(
                             orbit_lat
                         )
-                        and pd.notna(
+                        and
+                        pd.notna(
                             orbit_lon
                         )
-                        and (
+                        and
+                        (
                             24.0
                             <= orbit_lat
                             <= 37.5
                         )
-                        and (
+                        and
+                        (
                             -107.5
                             <= orbit_lon
                             <= -92.0
@@ -7775,94 +8546,96 @@ with competitor_tab:
                         orbit_map = pd.DataFrame(
                             [
                                 {
-                                    'lat':
+                                    "lat":
                                         float(
                                             orbit_lat
                                         ),
 
-                                    'lon':
+                                    "lon":
                                         float(
                                             orbit_lon
                                         ),
 
-                                    'Project':
+                                    "Project":
                                         clean_text(
                                             orbit_reference.get(
-                                                'Power Project Name'
+                                                "Power Project Name"
                                             )
                                         )
-                                        or 'Project Orbit',
+                                        or "Project Orbit",
 
-                                    'Owner Display':
+                                    "Owner Display":
                                         clean_text(
                                             orbit_reference.get(
-                                                'Owner'
+                                                "Owner"
                                             )
                                         )
-                                        or 'N/A',
+                                        or "N/A",
 
-                                    'Capacity Display':
+                                    "Capacity Display":
                                         (
                                             f"{orbit_reference.get('Capacity (MW)'):,.0f} MW"
+
                                             if pd.notna(
                                                 orbit_reference.get(
-                                                    'Capacity (MW)'
+                                                    "Capacity (MW)"
                                                 )
                                             )
-                                            else 'N/A'
+
+                                            else "N/A"
                                         ),
 
-                                    'Status Display':
+                                    "Status Display":
                                         clean_text(
                                             orbit_reference.get(
-                                                'Power Project Status'
+                                                "Power Project Status"
                                             )
                                         )
-                                        or 'N/A',
+                                        or "N/A",
 
-                                    'Detailed Status Display':
+                                    "Detailed Status Display":
                                         clean_text(
                                             orbit_reference.get(
-                                                'Detailed Status'
+                                                "Detailed Status"
                                             )
                                         )
-                                        or 'N/A',
+                                        or "N/A",
 
-                                    'County Display':
+                                    "County Display":
                                         clean_text(
                                             orbit_reference.get(
-                                                'County'
+                                                "County"
                                             )
                                         )
-                                        or 'N/A',
+                                        or "N/A",
 
-                                    'POI Display':
+                                    "POI Display":
                                         clean_text(
                                             orbit_reference.get(
-                                                'Point of Interconnection'
+                                                "Point of Interconnection"
                                             )
                                         )
-                                        or 'N/A',
+                                        or "N/A",
 
-                                    'Queue Display':
+                                    "Queue Display":
                                         clean_text(
                                             orbit_reference.get(
-                                                'Queue ID'
+                                                "Queue ID"
                                             )
                                         )
-                                        or 'N/A',
+                                        or "N/A",
 
-                                    'COD Display':
+                                    "COD Display":
                                         format_date(
                                             orbit_reference.get(
-                                                'First Power Date'
+                                                "First Power Date"
                                             )
                                         ),
 
-                                    'Marker Type':
-                                        'Project Orbit',
+                                    "Marker Type":
+                                        "Project Orbit",
 
-                                    'Map Radius':
+                                    "Map Radius":
                                         42000
                                 }
                             ]
@@ -7870,15 +8643,15 @@ with competitor_tab:
 
                         competitor_layers.append(
                             pdk.Layer(
-                                'ScatterplotLayer',
+                                "ScatterplotLayer",
                                 data=
                                     orbit_map,
                                 id=
-                                    'project_orbit_reference',
+                                    "project_orbit_reference",
                                 get_position=
-                                    '[lon, lat]',
+                                    "[lon, lat]",
                                 get_radius=
-                                    'Map Radius',
+                                    "Map Radius",
                                 get_fill_color=[
                                     245,
                                     166,
@@ -7904,24 +8677,26 @@ with competitor_tab:
                 map_frames = [
                     frame[
                         [
-                            'lat',
-                            'lon'
+                            "lat",
+                            "lon"
                         ]
                     ]
+
                     for frame
                     in [
                         competitor_map,
                         orbit_map
                     ]
+
                     if not frame.empty
                 ]
 
                 if not map_frames:
 
                     st.info(
-                        'No competitors in the current '
-                        'filtered view have usable '
-                        'coordinates for mapping.'
+                        "No competitors in the current "
+                        "filtered view have usable "
+                        "coordinates for mapping."
                     )
 
                 else:
@@ -7935,33 +8710,33 @@ with competitor_tab:
 
                     competitor_map_lat = float(
                         combined_map_points[
-                            'lat'
+                            "lat"
                         ].mean()
                     )
 
                     competitor_map_lon = float(
                         combined_map_points[
-                            'lon'
+                            "lon"
                         ].mean()
                     )
 
                     lat_span = float(
                         combined_map_points[
-                            'lat'
+                            "lat"
                         ].max()
                         -
                         combined_map_points[
-                            'lat'
+                            "lat"
                         ].min()
                     )
 
                     lon_span = float(
                         combined_map_points[
-                            'lon'
+                            "lon"
                         ].max()
                         -
                         combined_map_points[
-                            'lon'
+                            "lon"
                         ].min()
                     )
 
@@ -7990,46 +8765,46 @@ with competitor_tab:
 
                         competitor_map_zoom = 8.0
 
-                    competitor_deck = (
-                        pdk.Deck(
-                            map_style=(
-                                'https://basemaps.cartocdn.com/'
-                                'gl/positron-gl-style/style.json'
+                    competitor_deck = pdk.Deck(
+                        map_style=
+                            "https://basemaps.cartocdn.com/"
+                            "gl/positron-gl-style/style.json",
+
+                        initial_view_state=
+                            pdk.ViewState(
+                                latitude=
+                                    competitor_map_lat,
+                                longitude=
+                                    competitor_map_lon,
+                                zoom=
+                                    competitor_map_zoom,
+                                pitch=0
                             ),
-                            initial_view_state=
-                                pdk.ViewState(
-                                    latitude=
-                                        competitor_map_lat,
-                                    longitude=
-                                        competitor_map_lon,
-                                    zoom=
-                                        competitor_map_zoom,
-                                    pitch=0
-                                ),
-                            layers=
-                                competitor_layers,
-                            tooltip={
-                                'html':
-                                    '<b>{Project}</b><br/>'
-                                    'Type: {Marker Type}<br/>'
-                                    'Owner: {Owner Display}<br/>'
-                                    'Capacity: {Capacity Display}<br/>'
-                                    'Status: {Status Display}<br/>'
-                                    'Detailed Status: {Detailed Status Display}<br/>'
-                                    'County: {County Display}<br/>'
-                                    'POI: {POI Display}<br/>'
-                                    'Queue ID: {Queue Display}<br/>'
-                                    'COD: {COD Display}',
 
-                                'style': {
-                                    'backgroundColor':
-                                        'rgba(20,20,20,0.92)',
+                        layers=
+                            competitor_layers,
 
-                                    'color':
-                                        'white'
-                                }
+                        tooltip={
+                            "html":
+                                "<b>{Project}</b><br/>"
+                                "Type: {Marker Type}<br/>"
+                                "Owner: {Owner Display}<br/>"
+                                "Capacity: {Capacity Display}<br/>"
+                                "Status: {Status Display}<br/>"
+                                "Detailed Status: {Detailed Status Display}<br/>"
+                                "County: {County Display}<br/>"
+                                "POI: {POI Display}<br/>"
+                                "Queue ID: {Queue Display}<br/>"
+                                "COD: {COD Display}",
+
+                            "style": {
+                                "backgroundColor":
+                                    "rgba(20,20,20,0.92)",
+
+                                "color":
+                                    "white"
                             }
-                        )
+                        }
                     )
 
                     st.pydeck_chart(
@@ -8039,51 +8814,55 @@ with competitor_tab:
                     )
 
                     st.caption(
-                        f'Mapped competitors: '
-                        f'{len(competitor_map):,} '
-                        f'of {len(competitor_view):,}. '
-                        'Projects without usable '
-                        'coordinates remain in the '
-                        'downloadable competitor list.'
+                        f"Mapped competitors: "
+                        f"{len(competitor_map):,} "
+                        f"of {len(competitor_view):,}. "
+                        "Projects without usable "
+                        "coordinates remain in the "
+                        "downloadable competitor list."
                     )
 
+
+            # ------------------------------------------------
+            # OWNER CONCENTRATION
+            # ------------------------------------------------
             st.divider()
 
             st.markdown(
-                '### Owner / Developer Concentration'
+                "### Owner / Developer Concentration"
             )
 
             competitor_owner_summary = (
                 competitor_view
                 .groupby(
-                    'Owner',
+                    "Owner",
                     as_index=False
                 )
                 .agg(
                     Projects=(
-                        'Power Project Name',
-                        'count'
+                        "Power Project Name",
+                        "count"
                     ),
 
                     Total_MW=(
-                        'Capacity (MW)',
-                        'sum'
+                        "Capacity (MW)",
+                        "sum"
                     ),
 
                     Average_MW=(
-                        'Capacity (MW)',
-                        'mean'
+                        "Capacity (MW)",
+                        "mean"
                     ),
 
                     Earliest_COD=(
-                        'First Power Date',
-                        'min'
+                        "First Power Date",
+                        "min"
                     )
                 )
                 .sort_values(
                     by=[
-                        'Total_MW',
-                        'Projects'
+                        "Total_MW",
+                        "Projects"
                     ],
                     ascending=[
                         False,
@@ -8098,14 +8877,14 @@ with competitor_tab:
             competitor_owner_summary = (
                 competitor_owner_summary.rename(
                     columns={
-                        'Total_MW':
-                            'Total MW',
+                        "Total_MW":
+                            "Total MW",
 
-                        'Average_MW':
-                            'Average MW',
+                        "Average_MW":
+                            "Average MW",
 
-                        'Earliest_COD':
-                            'Earliest COD'
+                        "Earliest_COD":
+                            "Earliest COD"
                     }
                 )
             )
@@ -8115,68 +8894,76 @@ with competitor_tab:
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    'Total MW':
+                    "Total MW":
                         st.column_config.NumberColumn(
-                            'Total MW',
-                            format='%.0f'
+                            "Total MW",
+                            format="%.0f"
                         ),
 
-                    'Average MW':
+                    "Average MW":
                         st.column_config.NumberColumn(
-                            'Average MW',
-                            format='%.0f'
+                            "Average MW",
+                            format="%.0f"
                         ),
 
-                    'Earliest COD':
+                    "Earliest COD":
                         st.column_config.DateColumn(
-                            'Earliest COD'
+                            "Earliest COD"
                         )
                 }
             )
 
+
+            # ------------------------------------------------
+            # COMPETITOR LIST
+            # ------------------------------------------------
             st.divider()
 
             st.markdown(
-                '### ERCOT South Competitor List'
+                "### ERCOT South Competitor List"
             )
 
             competitor_list_columns = [
-                'Power Project Name',
-                'Owner',
-                'Power Project Type',
-                'Capacity (MW)',
-                'MW Delta vs Orbit',
-                'Power Project Status',
-                'Detailed Status',
-                'First Power Date',
-                'County',
-                'Queue ID',
-                'Point of Interconnection',
-                'ISO Zone',
-                'Interconnection Service Type',
-                'Queue Cycle',
-                'Queue Date',
-                'Interconnection Cost Physical ($)',
-                'Interconnection Cost System Upgrade ($)',
-                'Interconnection Cost Total ($)',
-                'Contract Type',
-                'Contract Offtaker',
-                'Contract Execution Date',
-                'Contract Termination Date',
-                'Contract Term Years (Year)',
-                'PTC/ITC',
-                'Equipment Manufacturer',
-                'Equipment Model',
-                'EPC',
-                'Integrator',
-                'Latitude (Degrees)',
-                'Longitude (Degrees)'
+                "Filtered Queue Placement",
+                "Queue Stage",
+                "Power Project Name",
+                "Owner",
+                "Power Project Type",
+                "Capacity (MW)",
+                "MW Delta vs Orbit",
+                "Power Project Status",
+                "Detailed Status",
+                "First Power Date",
+                "County",
+                "Queue ID",
+                "Point of Interconnection",
+                "ISO Zone",
+                "Interconnection Service Type",
+                "Queue Cycle",
+                "Queue Date",
+                "Interconnection Cost Physical ($)",
+                "Interconnection Cost System Upgrade ($)",
+                "Interconnection Cost Total ($)",
+                "Contract Type",
+                "Contract Offtaker",
+                "Contract Execution Date",
+                "Contract Termination Date",
+                "Contract Term Years (Year)",
+                "PTC/ITC",
+                "Equipment Manufacturer",
+                "Equipment Model",
+                "EPC",
+                "Integrator",
+                "Latitude (Degrees)",
+                "Longitude (Degrees)"
             ]
 
             competitor_list_columns = [
                 column
+
                 for column
                 in competitor_list_columns
+
                 if column
                 in competitor_view.columns
             ]
@@ -8184,12 +8971,13 @@ with competitor_tab:
             competitor_list = (
                 competitor_view[
                     competitor_list_columns
-                ].copy()
+                ]
+                .copy()
             )
 
             competitor_list.insert(
                 0,
-                'Competitor Rank',
+                "Competitor Rank",
                 np.arange(
                     1,
                     len(
@@ -8203,36 +8991,42 @@ with competitor_tab:
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    'Capacity (MW)':
+                    "Filtered Queue Placement":
                         st.column_config.NumberColumn(
-                            'Capacity (MW)',
-                            format='%.0f'
+                            "Queue Placement",
+                            format="#%d"
                         ),
 
-                    'MW Delta vs Orbit':
+                    "Capacity (MW)":
                         st.column_config.NumberColumn(
-                            'MW Delta vs Orbit',
-                            format='%+.0f'
+                            "Capacity (MW)",
+                            format="%.0f"
                         ),
 
-                    'First Power Date':
-                        st.column_config.DateColumn(
-                            'COD'
+                    "MW Delta vs Orbit":
+                        st.column_config.NumberColumn(
+                            "MW Delta vs Orbit",
+                            format="%+.0f"
                         ),
 
-                    'Queue Date':
+                    "First Power Date":
                         st.column_config.DateColumn(
-                            'Queue Date'
+                            "COD"
                         ),
 
-                    'Contract Execution Date':
+                    "Queue Date":
                         st.column_config.DateColumn(
-                            'Contract Execution Date'
+                            "Queue Date"
                         ),
 
-                    'Contract Termination Date':
+                    "Contract Execution Date":
                         st.column_config.DateColumn(
-                            'Contract Termination Date'
+                            "Contract Execution Date"
+                        ),
+
+                    "Contract Termination Date":
+                        st.column_config.DateColumn(
+                            "Contract Termination Date"
                         )
                 }
             )
@@ -8243,26 +9037,30 @@ with competitor_tab:
                     index=False
                 )
                 .encode(
-                    'utf-8'
+                    "utf-8"
                 )
             )
 
             st.download_button(
-                '⬇️ Download ERCOT South Orbit Competitor List',
+                "⬇️ Download ERCOT South Orbit Competitor List",
                 data=
                     competitor_csv,
                 file_name=
-                    'ERCOT_South_Orbit_Competitors_250_to_700MW.csv',
+                    "ERCOT_South_Orbit_Competitors_Filtered_MW.csv",
                 mime=
-                    'text/csv',
+                    "text/csv",
                 key=
-                    'download_orbit_competitor_list'
+                    "download_orbit_competitor_list"
             )
 
+
+            # ------------------------------------------------
+            # PROJECT DRILLDOWN
+            # ------------------------------------------------
             st.divider()
 
             st.markdown(
-                '### Competitor Project Drill-Down'
+                "### Competitor Project Drill-Down"
             )
 
             competitor_drill_labels = (
@@ -8279,11 +9077,11 @@ with competitor_tab:
 
             competitor_drill_label = (
                 st.selectbox(
-                    'Select competitor',
+                    "Select competitor",
                     options=
                         competitor_drill_labels,
                     key=
-                        'orbit_competitor_drilldown'
+                        "orbit_competitor_drilldown"
                 )
             )
 
@@ -8296,93 +9094,104 @@ with competitor_tab:
                 ]
             )
 
-            (
-                d1,
-                d2,
-                d3,
-                d4,
-                d5
-            ) = st.columns(
-                5
+            d1, d2, d3, d4, d5, d6 = st.columns(
+                6
             )
 
             d1.metric(
-                'Capacity',
-                f"{competitor_drill['Capacity (MW)']:,.0f} MW"
+                "Queue Placement",
+                (
+                    f"#{int(competitor_drill['Filtered Queue Placement'])}"
+
+                    if pd.notna(
+                        competitor_drill.get(
+                            "Filtered Queue Placement"
+                        )
+                    )
+
+                    else "N/A"
+                )
             )
 
             d2.metric(
-                'Status',
+                "Queue Stage",
                 clean_text(
                     competitor_drill.get(
-                        'Power Project Status'
+                        "Queue Stage"
                     )
                 )
-                or 'N/A'
+                or "N/A"
             )
 
             d3.metric(
-                'COD',
-                format_date(
-                    competitor_drill.get(
-                        'First Power Date'
-                    )
-                )
+                "Capacity",
+                f"{competitor_drill['Capacity (MW)']:,.0f} MW"
             )
 
             d4.metric(
-                'County',
+                "Status",
                 clean_text(
                     competitor_drill.get(
-                        'County'
+                        "Power Project Status"
                     )
                 )
-                or 'N/A'
+                or "N/A"
             )
 
             d5.metric(
-                'Queue ID',
-                clean_text(
+                "COD",
+                format_date(
                     competitor_drill.get(
-                        'Queue ID'
+                        "First Power Date"
                     )
                 )
-                or 'N/A'
+            )
+
+            d6.metric(
+                "County",
+                clean_text(
+                    competitor_drill.get(
+                        "County"
+                    )
+                )
+                or "N/A"
             )
 
             competitor_detail_fields = [
-                'Power Project Name',
-                'Generator Name',
-                'Generator ID',
-                'Owner',
-                'Power Project Type',
-                'Capacity (MW)',
-                'Power Project Status',
-                'Detailed Status',
-                'First Power Date',
-                'ERCOT Area',
-                'ISO Zone',
-                'County',
-                'Queue ID',
-                'Point of Interconnection',
-                'Interconnection Service Type',
-                'Queue Cycle',
-                'Queue Date',
-                'Interconnection Cost Physical ($)',
-                'Interconnection Cost System Upgrade ($)',
-                'Interconnection Cost Total ($)',
-                'Contract Type',
-                'Contract Offtaker',
-                'Contract Execution Date',
-                'Contract Termination Date',
-                'Contract Term Years (Year)',
-                'PTC/ITC',
-                'Equipment Manufacturer',
-                'Equipment Model',
-                'EPC',
-                'Integrator',
-                'Latitude (Degrees)',
-                'Longitude (Degrees)'
+                "Filtered Queue Placement",
+                "Queue Stage",
+                "Power Project Name",
+                "Generator Name",
+                "Generator ID",
+                "Owner",
+                "Power Project Type",
+                "Capacity (MW)",
+                "Power Project Status",
+                "Detailed Status",
+                "First Power Date",
+                "ERCOT Area",
+                "ISO Zone",
+                "County",
+                "Queue ID",
+                "Point of Interconnection",
+                "Interconnection Service Type",
+                "Queue Cycle",
+                "Queue Date",
+                "Interconnection Cost Physical ($)",
+                "Interconnection Cost System Upgrade ($)",
+                "Interconnection Cost Total ($)",
+                "Contract Type",
+                "Contract Offtaker",
+                "Contract Execution Date",
+                "Contract Termination Date",
+                "Contract Term Years (Year)",
+                "PTC/ITC",
+                "Equipment Manufacturer",
+                "Equipment Model",
+                "EPC",
+                "Integrator",
+                "Latitude (Degrees)",
+                "Longitude (Degrees)"
             ]
 
             competitor_detail_rows = []
@@ -8398,10 +9207,10 @@ with competitor_tab:
                 )
 
                 if field in [
-                    'First Power Date',
-                    'Queue Date',
-                    'Contract Execution Date',
-                    'Contract Termination Date'
+                    "First Power Date",
+                    "Queue Date",
+                    "Contract Execution Date",
+                    "Contract Termination Date"
                 ]:
 
                     display_value = format_date(
@@ -8412,7 +9221,7 @@ with competitor_tab:
                     value
                 ):
 
-                    display_value = 'N/A'
+                    display_value = "N/A"
 
                 else:
 
@@ -8422,10 +9231,10 @@ with competitor_tab:
 
                 competitor_detail_rows.append(
                     {
-                        'Field':
+                        "Field":
                             field,
 
-                        'Value':
+                        "Value":
                             display_value
                     }
                 )
@@ -8439,44 +9248,48 @@ with competitor_tab:
             )
 
 
+# ============================================================
+# MAP EXPLORER
+# ============================================================
 with map_tab:
 
     st.markdown(
-        '## 🗺️ ERCOT Acquisition Map'
+        "## 🗺️ ERCOT Acquisition Map"
     )
 
     st.caption(
-        'All projects with valid Orennia coordinates '
-        'are shown by default. Use the filters to '
-        'screen by technology, ERCOT area, score, '
-        'owner, development stage and COD. Select '
-        'a project to isolate it and drill down.'
+        "All projects with valid Orennia coordinates "
+        "are shown by default. Use the filters to "
+        "screen by technology, ERCOT area, score, "
+        "owner, development stage and COD. Select "
+        "a project to isolate it and drill down."
     )
 
     lat_col = (
-        'Latitude (Degrees)'
-        if 'Latitude (Degrees)'
+        "Latitude (Degrees)"
+        if "Latitude (Degrees)"
         in df.columns
         else None
     )
 
     lon_col = (
-        'Longitude (Degrees)'
-        if 'Longitude (Degrees)'
+        "Longitude (Degrees)"
+        if "Longitude (Degrees)"
         in df.columns
         else None
     )
 
     if (
         lat_col is None
-        or lon_col is None
+        or
+        lon_col is None
     ):
 
         st.error(
-            'The active Power Projects CSV does not '
-            'contain Latitude (Degrees) and Longitude '
-            '(Degrees). Use the Orennia export that '
-            'includes those fields.'
+            "The active Power Projects CSV does not "
+            "contain Latitude (Degrees) and Longitude "
+            "(Degrees). Use the Orennia export that "
+            "includes those fields."
         )
 
     else:
@@ -8484,22 +9297,23 @@ with map_tab:
         map_base = df.copy()
 
         map_base[
-            'Map Latitude'
+            "Map Latitude"
         ] = pd.to_numeric(
             map_base[
                 lat_col
             ],
-            errors='coerce'
+            errors="coerce"
         )
 
         map_base[
-            'Map Longitude'
+            "Map Longitude"
         ] = pd.to_numeric(
             map_base[
                 lon_col
             ],
-            errors='coerce'
+            errors="coerce"
         )
+
 
         def map_development_stage_label(
             row
@@ -8507,71 +9321,74 @@ with map_tab:
 
             status = clean_text(
                 row.get(
-                    'Power Project Status'
+                    "Power Project Status"
                 )
             )
 
             detailed = clean_text(
                 row.get(
-                    'Detailed Status'
+                    "Detailed Status"
                 )
             )
 
             if (
-                status == 'Operating'
-                or detailed
-                == 'Construction Complete'
+                status == "Operating"
+                or
+                detailed == "Construction Complete"
             ):
 
-                return 'Operating / Complete'
+                return "Operating / Complete"
 
             if (
-                'More Than 50%'
+                "More Than 50%"
                 in detailed
-                or '>50%'
+                or
+                ">50%"
                 in detailed
             ):
 
-                return '>50% Construction'
+                return ">50% Construction"
 
-            if status == 'In Construction':
+            if status == "In Construction":
 
-                return 'In Construction'
+                return "In Construction"
 
             if (
-                status == 'IA Executed'
-                or ', IA'
+                status == "IA Executed"
+                or
+                ", IA"
                 in detailed
             ):
 
-                return 'IA Executed'
+                return "IA Executed"
 
-            if 'FIS Completed' in detailed:
+            if "FIS Completed" in detailed:
 
-                return 'FIS Completed'
+                return "FIS Completed"
 
-            if 'FIS Started' in detailed:
+            if "FIS Started" in detailed:
 
-                return 'FIS Started'
+                return "FIS Started"
 
-            if status == 'Pre-Study':
+            if status == "Pre-Study":
 
-                return 'Pre-Study'
+                return "Pre-Study"
 
             if status in [
-                'Inactive',
-                'Suspended',
-                'Retired'
+                "Inactive",
+                "Suspended",
+                "Retired"
             ]:
 
                 return (
-                    'Inactive / Suspended / Retired'
+                    "Inactive / Suspended / Retired"
                 )
 
-            return 'Studies / Other'
+            return "Studies / Other"
+
 
         map_base[
-            'Map Development Stage'
+            "Map Development Stage"
         ] = map_base.apply(
             map_development_stage_label,
             axis=1
@@ -8579,26 +9396,27 @@ with map_tab:
 
         valid_coordinate_mask = (
             map_base[
-                'Map Latitude'
+                "Map Latitude"
             ].between(
                 24.0,
                 37.5,
-                inclusive='both'
+                inclusive="both"
             )
             &
             map_base[
-                'Map Longitude'
+                "Map Longitude"
             ].between(
                 -107.5,
                 -92.0,
-                inclusive='both'
+                inclusive="both"
             )
         )
 
         mapped_universe = (
             map_base[
                 valid_coordinate_mask
-            ].copy()
+            ]
+            .copy()
         )
 
         unmapped_count = int(
@@ -8613,10 +9431,10 @@ with map_tab:
         if mapped_universe.empty:
 
             st.warning(
-                'No projects in the current '
-                'acquisition universe have valid '
-                'latitude / longitude coordinates '
-                'that can be mapped.'
+                "No projects in the current "
+                "acquisition universe have valid "
+                "latitude / longitude coordinates "
+                "that can be mapped."
             )
 
         else:
@@ -8624,9 +9442,10 @@ with map_tab:
             technology_options = sorted(
                 [
                     value
+
                     for value
                     in mapped_universe[
-                        'Power Project Type'
+                        "Power Project Type"
                     ]
                     .dropna()
                     .astype(
@@ -8634,6 +9453,7 @@ with map_tab:
                     )
                     .unique()
                     .tolist()
+
                     if clean_text(
                         value
                     )
@@ -8643,9 +9463,10 @@ with map_tab:
             area_options = sorted(
                 [
                     value
+
                     for value
                     in mapped_universe[
-                        'ERCOT Area'
+                        "ERCOT Area"
                     ]
                     .dropna()
                     .astype(
@@ -8653,6 +9474,7 @@ with map_tab:
                     )
                     .unique()
                     .tolist()
+
                     if clean_text(
                         value
                     )
@@ -8660,20 +9482,20 @@ with map_tab:
             )
 
             stage_order = [
-                'Operating / Complete',
-                '>50% Construction',
-                'In Construction',
-                'IA Executed',
-                'FIS Completed',
-                'FIS Started',
-                'Studies / Other',
-                'Pre-Study',
-                'Inactive / Suspended / Retired'
+                "Operating / Complete",
+                ">50% Construction",
+                "In Construction",
+                "IA Executed",
+                "FIS Completed",
+                "FIS Started",
+                "Studies / Other",
+                "Pre-Study",
+                "Inactive / Suspended / Retired"
             ]
 
             existing_stages = set(
                 mapped_universe[
-                    'Map Development Stage'
+                    "Map Development Stage"
                 ]
                 .dropna()
                 .astype(
@@ -8684,8 +9506,10 @@ with map_tab:
 
             stage_options = [
                 stage
+
                 for stage
                 in stage_order
+
                 if stage
                 in existing_stages
             ]
@@ -8693,18 +9517,20 @@ with map_tab:
             owner_options = sorted(
                 [
                     value
+
                     for value
                     in mapped_universe[
-                        'Owner'
+                        "Owner"
                     ]
                     .fillna(
-                        ''
+                        ""
                     )
                     .astype(
                         str
                     )
                     .unique()
                     .tolist()
+
                     if clean_text(
                         value
                     )
@@ -8714,9 +9540,10 @@ with map_tab:
             status_options = sorted(
                 [
                     value
+
                     for value
                     in mapped_universe[
-                        'Power Project Status'
+                        "Power Project Status"
                     ]
                     .dropna()
                     .astype(
@@ -8724,6 +9551,7 @@ with map_tab:
                     )
                     .unique()
                     .tolist()
+
                     if clean_text(
                         value
                     )
@@ -8732,7 +9560,7 @@ with map_tab:
 
             cod_year_options = sorted(
                 mapped_universe[
-                    'First Power Date'
+                    "First Power Date"
                 ]
                 .dropna()
                 .dt.year
@@ -8743,11 +9571,7 @@ with map_tab:
                 .tolist()
             )
 
-            (
-                f1,
-                f2,
-                f3
-            ) = st.columns(
+            f1, f2, f3 = st.columns(
                 [
                     1.15,
                     1.15,
@@ -8759,13 +9583,13 @@ with map_tab:
 
                 selected_technologies = (
                     st.multiselect(
-                        'Technology',
+                        "Technology",
                         options=
                             technology_options,
                         default=
                             technology_options,
                         key=
-                            'map_technology_filter'
+                            "map_technology_filter"
                     )
                 )
 
@@ -8773,13 +9597,13 @@ with map_tab:
 
                 selected_areas = (
                     st.multiselect(
-                        'ERCOT Area',
+                        "ERCOT Area",
                         options=
                             area_options,
                         default=
                             area_options,
                         key=
-                            'map_area_filter'
+                            "map_area_filter"
                     )
                 )
 
@@ -8787,27 +9611,23 @@ with map_tab:
 
                 top_score_filter = (
                     st.selectbox(
-                        'Top Scored Projects',
+                        "Top Scored Projects",
                         options=[
-                            'All Projects',
-                            'Top 10',
-                            'Top 20',
-                            'Top 50',
-                            'Score 80+',
-                            'Score 70+',
-                            'Score 60+'
+                            "All Projects",
+                            "Top 10",
+                            "Top 20",
+                            "Top 50",
+                            "Score 80+",
+                            "Score 70+",
+                            "Score 60+"
                         ],
                         index=0,
                         key=
-                            'map_top_score_filter'
+                            "map_top_score_filter"
                     )
                 )
 
-            (
-                f4,
-                f5,
-                f6
-            ) = st.columns(
+            f4, f5, f6 = st.columns(
                 [
                     1.35,
                     1.2,
@@ -8819,14 +9639,14 @@ with map_tab:
 
                 selected_owners = (
                     st.multiselect(
-                        'Owner / Seller',
+                        "Owner / Seller",
                         options=
                             owner_options,
                         default=[],
                         placeholder=
-                            'All owners',
+                            "All owners",
                         key=
-                            'map_owner_filter'
+                            "map_owner_filter"
                     )
                 )
 
@@ -8834,13 +9654,13 @@ with map_tab:
 
                 selected_stages = (
                     st.multiselect(
-                        'Development Stage',
+                        "Development Stage",
                         options=
                             stage_options,
                         default=
                             stage_options,
                         key=
-                            'map_stage_filter'
+                            "map_stage_filter"
                     )
                 )
 
@@ -8848,20 +9668,17 @@ with map_tab:
 
                 selected_statuses = (
                     st.multiselect(
-                        'Project Status',
+                        "Project Status",
                         options=
                             status_options,
                         default=
                             status_options,
                         key=
-                            'map_status_filter'
+                            "map_status_filter"
                     )
                 )
 
-            (
-                f7,
-                f8
-            ) = st.columns(
+            f7, f8 = st.columns(
                 [
                     1.1,
                     2
@@ -8872,28 +9689,29 @@ with map_tab:
 
                 cod_filter_options = (
                     [
-                        'All COD Years'
+                        "All COD Years"
                     ]
                     + [
                         str(
                             year
                         )
+
                         for year
                         in cod_year_options
                     ]
                     + [
-                        'COD Missing'
+                        "COD Missing"
                     ]
                 )
 
                 selected_cod = (
                     st.selectbox(
-                        'COD',
+                        "COD",
                         options=
                             cod_filter_options,
                         index=0,
                         key=
-                            'map_cod_filter'
+                            "map_cod_filter"
                     )
                 )
 
@@ -8906,7 +9724,7 @@ with map_tab:
                 filtered_map = (
                     filtered_map[
                         filtered_map[
-                            'Power Project Type'
+                            "Power Project Type"
                         ].isin(
                             selected_technologies
                         )
@@ -8927,7 +9745,7 @@ with map_tab:
                 filtered_map = (
                     filtered_map[
                         filtered_map[
-                            'ERCOT Area'
+                            "ERCOT Area"
                         ].isin(
                             selected_areas
                         )
@@ -8948,7 +9766,7 @@ with map_tab:
                 filtered_map = (
                     filtered_map[
                         filtered_map[
-                            'Owner'
+                            "Owner"
                         ].isin(
                             selected_owners
                         )
@@ -8960,7 +9778,7 @@ with map_tab:
                 filtered_map = (
                     filtered_map[
                         filtered_map[
-                            'Map Development Stage'
+                            "Map Development Stage"
                         ].isin(
                             selected_stages
                         )
@@ -8981,7 +9799,7 @@ with map_tab:
                 filtered_map = (
                     filtered_map[
                         filtered_map[
-                            'Power Project Status'
+                            "Power Project Status"
                         ].isin(
                             selected_statuses
                         )
@@ -8997,19 +9815,19 @@ with map_tab:
                     ]
                 )
 
-            if selected_cod == 'COD Missing':
+            if selected_cod == "COD Missing":
 
                 filtered_map = (
                     filtered_map[
                         filtered_map[
-                            'First Power Date'
+                            "First Power Date"
                         ].isna()
                     ]
                 )
 
             elif (
                 selected_cod
-                != 'All COD Years'
+                != "All COD Years"
             ):
 
                 selected_cod_year = int(
@@ -9019,7 +9837,7 @@ with map_tab:
                 filtered_map = (
                     filtered_map[
                         filtered_map[
-                            'First Power Date'
+                            "First Power Date"
                         ].dt.year
                         == selected_cod_year
                     ]
@@ -9029,9 +9847,9 @@ with map_tab:
                 filtered_map
                 .sort_values(
                     by=[
-                        'Opportunity Score',
-                        'Data Completeness',
-                        'Capacity (MW)'
+                        "Opportunity Score",
+                        "Data Completeness",
+                        "Capacity (MW)"
                     ],
                     ascending=[
                         False,
@@ -9042,7 +9860,7 @@ with map_tab:
                 .copy()
             )
 
-            if top_score_filter == 'Top 10':
+            if top_score_filter == "Top 10":
 
                 filtered_map = (
                     filtered_map.head(
@@ -9050,7 +9868,7 @@ with map_tab:
                     )
                 )
 
-            elif top_score_filter == 'Top 20':
+            elif top_score_filter == "Top 20":
 
                 filtered_map = (
                     filtered_map.head(
@@ -9058,7 +9876,7 @@ with map_tab:
                     )
                 )
 
-            elif top_score_filter == 'Top 50':
+            elif top_score_filter == "Top 50":
 
                 filtered_map = (
                     filtered_map.head(
@@ -9066,50 +9884,50 @@ with map_tab:
                     )
                 )
 
-            elif top_score_filter == 'Score 80+':
+            elif top_score_filter == "Score 80+":
 
                 filtered_map = (
                     filtered_map[
                         pd.to_numeric(
                             filtered_map[
-                                'Opportunity Score'
+                                "Opportunity Score"
                             ],
-                            errors='coerce'
+                            errors="coerce"
                         )
                         >= 80
                     ]
                 )
 
-            elif top_score_filter == 'Score 70+':
+            elif top_score_filter == "Score 70+":
 
                 filtered_map = (
                     filtered_map[
                         pd.to_numeric(
                             filtered_map[
-                                'Opportunity Score'
+                                "Opportunity Score"
                             ],
-                            errors='coerce'
+                            errors="coerce"
                         )
                         >= 70
                     ]
                 )
 
-            elif top_score_filter == 'Score 60+':
+            elif top_score_filter == "Score 60+":
 
                 filtered_map = (
                     filtered_map[
                         pd.to_numeric(
                             filtered_map[
-                                'Opportunity Score'
+                                "Opportunity Score"
                             ],
-                            errors='coerce'
+                            errors="coerce"
                         )
                         >= 60
                     ]
                 )
 
             filtered_map[
-                'Map Selection Label'
+                "Map Selection Label"
             ] = filtered_map.apply(
                 lambda row:
                     f"{clean_text(row.get('Power Project Name'))} — "
@@ -9121,10 +9939,10 @@ with map_tab:
 
             project_options = (
                 [
-                    'All filtered projects'
+                    "All filtered projects"
                 ]
                 + filtered_map[
-                    'Map Selection Label'
+                    "Map Selection Label"
                 ].tolist()
             )
 
@@ -9132,27 +9950,27 @@ with map_tab:
 
                 selected_map_label = (
                     st.selectbox(
-                        'Specific Project Drill-Down',
+                        "Specific Project Drill-Down",
                         options=
                             project_options,
                         key=
-                            'portfolio_project_map_selector'
+                            "portfolio_project_map_selector"
                     )
                 )
 
             st.markdown(
-                '**Technology colors:** '
-                '🟠 Solar &nbsp;&nbsp; | &nbsp;&nbsp; '
-                '🔵 Storage &nbsp;&nbsp; | &nbsp;&nbsp; '
-                '🟢 Wind'
+                "**Technology colors:** "
+                "🟠 Solar &nbsp;&nbsp; | &nbsp;&nbsp; "
+                "🔵 Storage &nbsp;&nbsp; | &nbsp;&nbsp; "
+                "🟢 Wind"
             )
 
             if filtered_map.empty:
 
                 st.warning(
-                    'No mapped projects match the '
-                    'current filters. Broaden one or '
-                    'more filters to repopulate the map.'
+                    "No mapped projects match the "
+                    "current filters. Broaden one or "
+                    "more filters to repopulate the map."
                 )
 
             else:
@@ -9161,13 +9979,13 @@ with map_tab:
 
                 if (
                     selected_map_label
-                    != 'All filtered projects'
+                    != "All filtered projects"
                 ):
 
                     selected_project = (
                         filtered_map[
                             filtered_map[
-                                'Map Selection Label'
+                                "Map Selection Label"
                             ]
                             == selected_map_label
                         ]
@@ -9185,61 +10003,57 @@ with map_tab:
                     map_view = (
                         filtered_map[
                             filtered_map[
-                                'Map Selection Label'
+                                "Map Selection Label"
                             ]
                             == selected_map_label
                         ]
                         .copy()
                     )
 
-                (
-                    k1,
-                    k2,
-                    k3,
-                    k4,
-                    k5
-                ) = st.columns(
+                k1, k2, k3, k4, k5 = st.columns(
                     5
                 )
 
                 k1.metric(
-                    'Mapped Projects',
-                    f'{len(map_view):,}'
+                    "Mapped Projects",
+                    f"{len(map_view):,}"
                 )
 
                 total_capacity = (
                     pd.to_numeric(
                         map_view[
-                            'Capacity (MW)'
+                            "Capacity (MW)"
                         ],
-                        errors='coerce'
+                        errors="coerce"
                     )
                     .sum()
                 )
 
                 k2.metric(
-                    'Capacity',
-                    f'{total_capacity:,.0f} MW'
+                    "Capacity",
+                    f"{total_capacity:,.0f} MW"
                 )
 
                 average_score = (
                     pd.to_numeric(
                         map_view[
-                            'Opportunity Score'
+                            "Opportunity Score"
                         ],
-                        errors='coerce'
+                        errors="coerce"
                     )
                     .mean()
                 )
 
                 k3.metric(
-                    'Average Score',
+                    "Average Score",
                     (
-                        f'{average_score:.1f}'
+                        f"{average_score:.1f}"
+
                         if pd.notna(
                             average_score
                         )
-                        else 'N/A'
+
+                        else "N/A"
                     )
                 )
 
@@ -9247,46 +10061,46 @@ with map_tab:
                     (
                         pd.to_numeric(
                             map_view[
-                                'Opportunity Score'
+                                "Opportunity Score"
                             ],
-                            errors='coerce'
+                            errors="coerce"
                         )
                         >= 70
                     ).sum()
                 )
 
                 k4.metric(
-                    '70+ Score Targets',
-                    f'{priority_count:,}'
+                    "70+ Score Targets",
+                    f"{priority_count:,}"
                 )
 
                 if selected_project is None:
 
                     k5.metric(
-                        'Selected Project',
-                        'All'
+                        "Selected Project",
+                        "All"
                     )
 
                 else:
 
                     k5.metric(
-                        'Selected Project',
+                        "Selected Project",
                         clean_text(
                             selected_project.get(
-                                'Power Project Name'
+                                "Power Project Name"
                             )
                         )
-                        or 'N/A'
+                        or "N/A"
                     )
 
                 if unmapped_count > 0:
 
                     st.caption(
-                        f'{unmapped_count:,} projects '
-                        'in the acquisition universe '
-                        'do not currently have usable '
-                        'map coordinates and are '
-                        'excluded from the map only.'
+                        f"{unmapped_count:,} projects "
+                        "in the acquisition universe "
+                        "do not currently have usable "
+                        "map coordinates and are "
+                        "excluded from the map only."
                     )
 
                 map_plot = (
@@ -9294,13 +10108,13 @@ with map_tab:
                 )
 
                 map_plot[
-                    'Project'
+                    "Project"
                 ] = (
                     map_plot[
-                        'Power Project Name'
+                        "Power Project Name"
                     ]
                     .fillna(
-                        ''
+                        ""
                     )
                     .astype(
                         str
@@ -9308,28 +10122,28 @@ with map_tab:
                 )
 
                 map_plot[
-                    'Owner Display'
+                    "Owner Display"
                 ] = (
                     map_plot[
-                        'Owner'
+                        "Owner"
                     ]
                     .replace(
-                        '',
+                        "",
                         np.nan
                     )
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                 )
 
                 map_plot[
-                    'Technology'
+                    "Technology"
                 ] = (
                     map_plot[
-                        'Power Project Type'
+                        "Power Project Type"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
@@ -9337,43 +10151,43 @@ with map_tab:
                 )
 
                 map_plot[
-                    'Capacity Display'
+                    "Capacity Display"
                 ] = (
                     pd.to_numeric(
                         map_plot[
-                            'Capacity (MW)'
+                            "Capacity (MW)"
                         ],
-                        errors='coerce'
+                        errors="coerce"
                     )
                     .apply(
                         lambda value:
-                            f'{value:,.1f} MW'
+                            f"{value:,.1f} MW"
                             if pd.notna(
                                 value
                             )
-                            else 'N/A'
+                            else "N/A"
                     )
                 )
 
                 map_plot[
-                    'Development Stage Display'
+                    "Development Stage Display"
                 ] = (
                     map_plot[
-                        'Map Development Stage'
+                        "Map Development Stage"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                 )
 
                 map_plot[
-                    'Project Status Display'
+                    "Project Status Display"
                 ] = (
                     map_plot[
-                        'Power Project Status'
+                        "Power Project Status"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
@@ -9381,27 +10195,29 @@ with map_tab:
                 )
 
                 map_plot[
-                    'County Display'
+                    "County Display"
                 ] = (
                     map_plot[
-                        'County'
+                        "County"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
                     )
-                    if 'County'
+
+                    if "County"
                     in map_plot.columns
-                    else 'N/A'
+
+                    else "N/A"
                 )
 
                 map_plot[
-                    'COD Display'
+                    "COD Display"
                 ] = (
                     map_plot[
-                        'First Power Date'
+                        "First Power Date"
                     ]
                     .apply(
                         format_date
@@ -9409,81 +10225,83 @@ with map_tab:
                 )
 
                 map_plot[
-                    'Score Display'
+                    "Score Display"
                 ] = (
                     pd.to_numeric(
                         map_plot[
-                            'Opportunity Score'
+                            "Opportunity Score"
                         ],
-                        errors='coerce'
+                        errors="coerce"
                     )
                     .apply(
                         lambda value:
-                            f'{value:.1f}'
+                            f"{value:.1f}"
                             if pd.notna(
                                 value
                             )
-                            else 'N/A'
+                            else "N/A"
                     )
                 )
 
                 map_plot[
-                    'Rank Display'
+                    "Rank Display"
                 ] = (
                     pd.to_numeric(
                         map_plot.get(
-                            'Rank',
+                            "Rank",
                             pd.Series(
                                 np.nan,
                                 index=
                                     map_plot.index
                             )
                         ),
-                        errors='coerce'
+                        errors="coerce"
                     )
                     .apply(
                         lambda value:
-                            f'#{int(value)}'
+                            f"#{int(value)}"
                             if pd.notna(
                                 value
                             )
-                            else 'N/A'
+                            else "N/A"
                     )
                 )
 
                 map_plot[
-                    'Location Source Display'
+                    "Location Source Display"
                 ] = (
                     map_plot[
-                        'Location Source'
+                        "Location Source"
                     ]
                     .fillna(
-                        'N/A'
+                        "N/A"
                     )
                     .astype(
                         str
                     )
-                    if 'Location Source'
+
+                    if "Location Source"
                     in map_plot.columns
-                    else 'N/A'
+
+                    else "N/A"
                 )
 
                 technology_colors = {
-                    'Solar': [
+                    "Solar": [
                         245,
                         166,
                         35,
                         220
                     ],
 
-                    'Storage': [
+                    "Storage": [
                         38,
                         132,
                         255,
                         220
                     ],
 
-                    'Wind': [
+                    "Wind": [
                         47,
                         158,
                         68,
@@ -9492,13 +10310,13 @@ with map_tab:
                 }
 
                 map_plot[
-                    'Map Radius'
+                    "Map Radius"
                 ] = (
                     pd.to_numeric(
                         map_plot[
-                            'Capacity (MW)'
+                            "Capacity (MW)"
                         ],
-                        errors='coerce'
+                        errors="coerce"
                     )
                     .fillna(
                         50
@@ -9511,10 +10329,10 @@ with map_tab:
                 )
 
                 map_plot[
-                    'lat'
+                    "lat"
                 ] = (
                     map_plot[
-                        'Map Latitude'
+                        "Map Latitude"
                     ]
                     .astype(
                         float
@@ -9522,10 +10340,10 @@ with map_tab:
                 )
 
                 map_plot[
-                    'lon'
+                    "lon"
                 ] = (
                     map_plot[
-                        'Map Longitude'
+                        "Map Longitude"
                     ]
                     .astype(
                         float
@@ -9542,7 +10360,7 @@ with map_tab:
                     technology_map = (
                         map_plot[
                             map_plot[
-                                'Power Project Type'
+                                "Power Project Type"
                             ]
                             == technology_name
                         ]
@@ -9553,62 +10371,60 @@ with map_tab:
 
                         continue
 
-                    technology_layer = (
-                        pdk.Layer(
-                            'ScatterplotLayer',
-                            data=
-                                technology_map,
-                            id=
-                                f'{technology_name.lower()}_projects',
-                            get_position=
-                                '[lon, lat]',
-                            get_radius=
-                                'Map Radius',
-                            get_fill_color=
-                                technology_color,
-                            get_line_color=
-                                (
-                                    [
-                                        20,
-                                        20,
-                                        20,
-                                        255
-                                    ]
-                                    if selected_project
-                                    is not None
-                                    else [
-                                        255,
-                                        255,
-                                        255,
-                                        230
-                                    ]
-                                ),
-                            radius_min_pixels=
-                                (
-                                    14
-                                    if selected_project
-                                    is not None
-                                    else 6
-                                ),
-                            radius_max_pixels=
-                                (
-                                    30
-                                    if selected_project
-                                    is not None
-                                    else 18
-                                ),
-                            line_width_min_pixels=
-                                (
-                                    3
-                                    if selected_project
-                                    is not None
-                                    else 1
-                                ),
-                            pickable=True,
-                            auto_highlight=True,
-                            stroked=True,
-                            filled=True
-                        )
+                    technology_layer = pdk.Layer(
+                        "ScatterplotLayer",
+                        data=
+                            technology_map,
+                        id=
+                            f"{technology_name.lower()}_projects",
+                        get_position=
+                            "[lon, lat]",
+                        get_radius=
+                            "Map Radius",
+                        get_fill_color=
+                            technology_color,
+                        get_line_color=
+                            (
+                                [
+                                    20,
+                                    20,
+                                    20,
+                                    255
+                                ]
+                                if selected_project
+                                is not None
+                                else [
+                                    255,
+                                    255,
+                                    255,
+                                    230
+                                ]
+                            ),
+                        radius_min_pixels=
+                            (
+                                14
+                                if selected_project
+                                is not None
+                                else 6
+                            ),
+                        radius_max_pixels=
+                            (
+                                30
+                                if selected_project
+                                is not None
+                                else 18
+                            ),
+                        line_width_min_pixels=
+                            (
+                                3
+                                if selected_project
+                                is not None
+                                else 1
+                            ),
+                        pickable=True,
+                        auto_highlight=True,
+                        stroked=True,
+                        filled=True
                     )
 
                     layers.append(
@@ -9622,7 +10438,7 @@ with map_tab:
                 other_technology_map = (
                     map_plot[
                         ~map_plot[
-                            'Power Project Type'
+                            "Power Project Type"
                         ].isin(
                             known_technologies
                         )
@@ -9632,37 +10448,35 @@ with map_tab:
 
                 if not other_technology_map.empty:
 
-                    other_layer = (
-                        pdk.Layer(
-                            'ScatterplotLayer',
-                            data=
-                                other_technology_map,
-                            id=
-                                'other_projects',
-                            get_position=
-                                '[lon, lat]',
-                            get_radius=
-                                'Map Radius',
-                            get_fill_color=[
-                                120,
-                                120,
-                                120,
-                                210
-                            ],
-                            get_line_color=[
-                                255,
-                                255,
-                                255,
-                                230
-                            ],
-                            radius_min_pixels=6,
-                            radius_max_pixels=18,
-                            line_width_min_pixels=1,
-                            pickable=True,
-                            auto_highlight=True,
-                            stroked=True,
-                            filled=True
-                        )
+                    other_layer = pdk.Layer(
+                        "ScatterplotLayer",
+                        data=
+                            other_technology_map,
+                        id=
+                            "other_projects",
+                        get_position=
+                            "[lon, lat]",
+                        get_radius=
+                            "Map Radius",
+                        get_fill_color=[
+                            120,
+                            120,
+                            120,
+                            210
+                        ],
+                        get_line_color=[
+                            255,
+                            255,
+                            255,
+                            230
+                        ],
+                        radius_min_pixels=6,
+                        radius_max_pixels=18,
+                        line_width_min_pixels=1,
+                        pickable=True,
+                        auto_highlight=True,
+                        stroked=True,
+                        filled=True
                     )
 
                     layers.append(
@@ -9673,13 +10487,13 @@ with map_tab:
 
                     map_latitude = float(
                         selected_project[
-                            'Map Latitude'
+                            "Map Latitude"
                         ]
                     )
 
                     map_longitude = float(
                         selected_project[
-                            'Map Longitude'
+                            "Map Longitude"
                         ]
                     )
 
@@ -9689,33 +10503,33 @@ with map_tab:
 
                     map_latitude = float(
                         map_plot[
-                            'Map Latitude'
+                            "Map Latitude"
                         ].mean()
                     )
 
                     map_longitude = float(
                         map_plot[
-                            'Map Longitude'
+                            "Map Longitude"
                         ].mean()
                     )
 
                     lat_span = float(
                         map_plot[
-                            'Map Latitude'
+                            "Map Latitude"
                         ].max()
                         -
                         map_plot[
-                            'Map Latitude'
+                            "Map Latitude"
                         ].min()
                     )
 
                     lon_span = float(
                         map_plot[
-                            'Map Longitude'
+                            "Map Longitude"
                         ].max()
                         -
                         map_plot[
-                            'Map Longitude'
+                            "Map Longitude"
                         ].min()
                     )
 
@@ -9749,10 +10563,10 @@ with map_tab:
                         map_zoom = 8.0
 
                 deck = pdk.Deck(
-                    map_style=(
-                        'https://basemaps.cartocdn.com/'
-                        'gl/positron-gl-style/style.json'
-                    ),
+                    map_style=
+                        "https://basemaps.cartocdn.com/"
+                        "gl/positron-gl-style/style.json",
+
                     initial_view_state=
                         pdk.ViewState(
                             latitude=
@@ -9763,29 +10577,31 @@ with map_tab:
                                 map_zoom,
                             pitch=0
                         ),
+
                     layers=
                         layers,
+
                     tooltip={
-                        'html':
-                            '<b>{Project}</b><br/>'
-                            'Rank: {Rank Display}<br/>'
-                            'Owner: {Owner Display}<br/>'
-                            'Technology: {Technology}<br/>'
-                            'Capacity: {Capacity Display}<br/>'
-                            'Project Status: {Project Status Display}<br/>'
-                            'Development Stage: {Development Stage Display}<br/>'
-                            'ERCOT Area: {ERCOT Area}<br/>'
-                            'County: {County Display}<br/>'
-                            'COD: {COD Display}<br/>'
-                            'Opportunity Score: {Score Display}<br/>'
-                            'Location Source: {Location Source Display}',
+                        "html":
+                            "<b>{Project}</b><br/>"
+                            "Rank: {Rank Display}<br/>"
+                            "Owner: {Owner Display}<br/>"
+                            "Technology: {Technology}<br/>"
+                            "Capacity: {Capacity Display}<br/>"
+                            "Project Status: {Project Status Display}<br/>"
+                            "Development Stage: {Development Stage Display}<br/>"
+                            "ERCOT Area: {ERCOT Area}<br/>"
+                            "County: {County Display}<br/>"
+                            "COD: {COD Display}<br/>"
+                            "Opportunity Score: {Score Display}<br/>"
+                            "Location Source: {Location Source Display}",
 
-                        'style': {
-                            'backgroundColor':
-                                'rgba(20,20,20,0.92)',
+                        "style": {
+                            "backgroundColor":
+                                "rgba(20,20,20,0.92)",
 
-                            'color':
-                                'white'
+                            "color":
+                                "white"
                         }
                     }
                 )
@@ -9798,45 +10614,51 @@ with map_tab:
 
                 st.caption(
                     (
-                        'Single-project drill-down active — '
-                        'only the selected project is shown. '
-                        'Its marker color represents technology.'
+                        "Single-project drill-down active — "
+                        "only the selected project is shown. "
+                        "Its marker color represents technology."
                     )
+
                     if selected_project is not None
+
                     else
                     (
-                        'Marker color represents technology; '
-                        'marker size scales with MW. Hover '
-                        'over any project for rank, score, '
-                        'owner, status, COD and location details.'
+                        "Marker color represents technology; "
+                        "marker size scales with MW. Hover "
+                        "over any project for rank, score, "
+                        "owner, status, COD and location details."
                     )
                 )
 
                 st.markdown(
-                    '### Selected Project'
+                    "### Selected Project"
+
                     if selected_project is not None
+
                     else
-                    '### Filtered Project Universe'
+                    "### Filtered Project Universe"
                 )
 
                 map_table_columns = [
-                    'Rank',
-                    'Power Project Name',
-                    'Owner',
-                    'Power Project Type',
-                    'Capacity (MW)',
-                    'Map Development Stage',
-                    'Power Project Status',
-                    'ERCOT Area',
-                    'First Power Date',
-                    'Opportunity Score',
-                    'Action'
+                    "Rank",
+                    "Power Project Name",
+                    "Owner",
+                    "Power Project Type",
+                    "Capacity (MW)",
+                    "Map Development Stage",
+                    "Power Project Status",
+                    "ERCOT Area",
+                    "First Power Date",
+                    "Opportunity Score",
+                    "Action"
                 ]
 
                 available_map_table_columns = [
                     col
+
                     for col
                     in map_table_columns
+
                     if col
                     in filtered_map.columns
                 ]
@@ -9846,7 +10668,7 @@ with map_tab:
                         available_map_table_columns
                     ]
                     .sort_values(
-                        'Opportunity Score',
+                        "Opportunity Score",
                         ascending=False
                     )
                     .reset_index(
@@ -9859,29 +10681,29 @@ with map_tab:
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        'Rank':
+                        "Rank":
                             st.column_config.NumberColumn(
-                                'Rank',
-                                format='%d'
+                                "Rank",
+                                format="%d"
                             ),
 
-                        'Opportunity Score':
+                        "Opportunity Score":
                             st.column_config.ProgressColumn(
-                                'Opportunity Score',
+                                "Opportunity Score",
                                 min_value=0,
                                 max_value=100,
-                                format='%.1f'
+                                format="%.1f"
                             ),
 
-                        'Capacity (MW)':
+                        "Capacity (MW)":
                             st.column_config.NumberColumn(
-                                'Capacity (MW)',
-                                format='%.1f'
+                                "Capacity (MW)",
+                                format="%.1f"
                             ),
 
-                        'First Power Date':
+                        "First Power Date":
                             st.column_config.DateColumn(
-                                'COD'
+                                "COD"
                             )
                     }
                 )
@@ -9889,96 +10711,92 @@ with map_tab:
                 if selected_project is not None:
 
                     st.markdown(
-                        '### Selected Project Detail'
+                        "### Selected Project Detail"
                     )
 
-                    (
-                        d1,
-                        d2,
-                        d3,
-                        d4,
-                        d5
-                    ) = st.columns(
+                    d1, d2, d3, d4, d5 = st.columns(
                         5
                     )
 
                     d1.metric(
-                        'Opportunity Score',
+                        "Opportunity Score",
                         f"{selected_project['Opportunity Score']:.1f}"
                     )
 
                     d2.metric(
-                        'Technology',
+                        "Technology",
                         clean_text(
                             selected_project.get(
-                                'Power Project Type'
+                                "Power Project Type"
                             )
                         )
-                        or 'N/A'
+                        or "N/A"
                     )
 
                     d3.metric(
-                        'Capacity',
+                        "Capacity",
                         (
                             f"{selected_project['Capacity (MW)']:,.1f} MW"
+
                             if pd.notna(
                                 selected_project.get(
-                                    'Capacity (MW)'
+                                    "Capacity (MW)"
                                 )
                             )
-                            else 'N/A'
+
+                            else "N/A"
                         )
                     )
 
                     d4.metric(
-                        'ERCOT Area',
+                        "ERCOT Area",
                         clean_text(
                             selected_project.get(
-                                'ERCOT Area'
+                                "ERCOT Area"
                             )
                         )
-                        or 'N/A'
+                        or "N/A"
                     )
 
                     d5.metric(
-                        'COD',
+                        "COD",
                         format_date(
                             selected_project.get(
-                                'First Power Date'
+                                "First Power Date"
                             )
                         )
                     )
 
                     detail_fields = [
-                        'Rank',
-                        'Power Project Name',
-                        'Generator Name',
-                        'Generator ID',
-                        'Owner',
-                        'Queue ID',
-                        'Power Project Type',
-                        'Capacity (MW)',
-                        'Power Project Status',
-                        'Detailed Status',
-                        'Map Development Stage',
-                        'First Power Date',
-                        'ERCOT Area',
-                        'ISO Zone',
-                        'County',
-                        'Point of Interconnection',
-                        'Location Source',
-                        'Latitude (Degrees)',
-                        'Longitude (Degrees)',
-                        'Contract Type',
-                        'Contract Offtaker',
-                        'PTC/ITC',
-                        'Distress Score',
-                        'Development Stage',
-                        'Market / Revenue',
-                        'Acquisition Value',
-                        'Executability',
-                        'Opportunity Score',
-                        'Action'
+                        "Rank",
+                        "Power Project Name",
+                        "Generator Name",
+                        "Generator ID",
+                        "Owner",
+                        "Queue ID",
+                        "Power Project Type",
+                        "Capacity (MW)",
+                        "Power Project Status",
+                        "Detailed Status",
+                        "Map Development Stage",
+                        "First Power Date",
+                        "ERCOT Area",
+                        "ISO Zone",
+                        "County",
+                        "Point of Interconnection",
+                        "Location Source",
+                        "Latitude (Degrees)",
+                        "Longitude (Degrees)",
+                        "Contract Type",
+                        "Contract Offtaker",
+                        "PTC/ITC",
+                        "Distress Score",
+                        "Development Stage",
+                        "Market / Revenue",
+                        "Acquisition Value",
+                        "Executability",
+                        "Opportunity Score",
+                        "Action"
                     ]
 
                     detail_rows = []
@@ -9993,7 +10811,7 @@ with map_tab:
                             field
                         )
 
-                        if field == 'First Power Date':
+                        if field == "First Power Date":
 
                             display_value = format_date(
                                 value
@@ -10003,7 +10821,7 @@ with map_tab:
                             value
                         ):
 
-                            display_value = 'N/A'
+                            display_value = "N/A"
 
                         else:
 
@@ -10013,10 +10831,10 @@ with map_tab:
 
                         detail_rows.append(
                             {
-                                'Field':
+                                "Field":
                                     field,
 
-                                'Value':
+                                "Value":
                                     display_value
                             }
                         )
@@ -10030,34 +10848,37 @@ with map_tab:
                     )
 
 
+# ============================================================
+# PROJECT MARKET BENCHMARK
+# ============================================================
 with price_tab:
 
     st.divider()
 
     st.markdown(
-        '## 🎯 Acquisition Project Market Benchmark'
+        "## 🎯 Acquisition Project Market Benchmark"
     )
 
     st.caption(
-        'Select an acquisition target to compare '
-        'it with the latest broad ERCOT hub price '
-        'for its area. This is a screening benchmark, '
+        "Select an acquisition target to compare "
+        "it with the latest broad ERCOT hub price "
+        "for its area. This is a screening benchmark, "
         "not the project's nodal settlement price."
     )
 
     if market_rt_df.empty:
 
         st.info(
-            'Live Real-Time SPP is unavailable, '
-            'so project market benchmarking cannot '
-            'be shown right now.'
+            "Live Real-Time SPP is unavailable, "
+            "so project market benchmarking cannot "
+            "be shown right now."
         )
 
     elif df.empty:
 
         st.info(
-            'No acquisition projects are available '
-            'for benchmarking.'
+            "No acquisition projects are available "
+            "for benchmarking."
         )
 
     else:
@@ -10075,11 +10896,11 @@ with price_tab:
 
         selected_project_market_label = (
             st.selectbox(
-                'Project',
+                "Project",
                 options=
                     project_market_options,
                 key=
-                    'market_project_benchmark_selector'
+                    "market_project_benchmark_selector"
             )
         )
 
@@ -10096,25 +10917,25 @@ with price_tab:
         )
 
         area_to_hub = {
-            'ERCOT-N':
-                'HB_NORTH',
+            "ERCOT-N":
+                "HB_NORTH",
 
-            'ERCOT-H':
-                'HB_HOUSTON',
+            "ERCOT-H":
+                "HB_HOUSTON",
 
-            'ERCOT-S':
-                'HB_SOUTH',
+            "ERCOT-S":
+                "HB_SOUTH",
 
-            'ERCOT-W':
-                'HB_WEST',
+            "ERCOT-W":
+                "HB_WEST",
 
-            'Panhandle':
-                'HB_PAN'
+            "Panhandle":
+                "HB_PAN"
         }
 
         project_area = clean_text(
             market_project.get(
-                'ERCOT Area'
+                "ERCOT Area"
             )
         )
 
@@ -10126,13 +10947,14 @@ with price_tab:
 
         if (
             benchmark_hub is None
-            or benchmark_hub
+            or
+            benchmark_hub
             not in market_rt_df.columns
         ):
 
             st.warning(
-                f'No broad hub benchmark is '
-                f'configured for '
+                f"No broad hub benchmark is "
+                f"configured for "
                 f"{project_area or 'this project area'}."
             )
 
@@ -10140,14 +10962,14 @@ with price_tab:
 
             latest_market_day = (
                 market_rt_df[
-                    'Oper Day'
+                    "Oper Day"
                 ].max()
             )
 
             project_rt = (
                 market_rt_df[
                     market_rt_df[
-                        'Oper Day'
+                        "Oper Day"
                     ]
                     == latest_market_day
                 ]
@@ -10189,20 +11011,21 @@ with price_tab:
 
             if (
                 not market_dam_df.empty
-                and benchmark_hub
+                and
+                benchmark_hub
                 in market_dam_df.columns
             ):
 
                 latest_project_dam_day = (
                     market_dam_df[
-                        'Oper Day'
+                        "Oper Day"
                     ].max()
                 )
 
                 benchmark_dam_average = (
                     market_dam_df[
                         market_dam_df[
-                            'Oper Day'
+                            "Oper Day"
                         ]
                         == latest_project_dam_day
                     ][
@@ -10211,88 +11034,81 @@ with price_tab:
                     .mean()
                 )
 
-            (
-                b1,
-                b2,
-                b3,
-                b4,
-                b5,
-                b6
-            ) = st.columns(
+            b1, b2, b3, b4, b5, b6 = st.columns(
                 6
             )
 
             b1.metric(
-                'Project',
+                "Project",
                 clean_text(
                     market_project.get(
-                        'Power Project Name'
+                        "Power Project Name"
                     )
                 )
-                or 'N/A'
+                or "N/A"
             )
 
             b2.metric(
-                'ERCOT Area',
+                "ERCOT Area",
                 project_area
-                or 'N/A'
+                or "N/A"
             )
 
             b3.metric(
-                'Benchmark Hub',
+                "Benchmark Hub",
                 benchmark_hub
             )
 
             b4.metric(
-                'Latest RT',
+                "Latest RT",
                 price_metric_value(
                     latest_benchmark_price
                 )
             )
 
             b5.metric(
-                'RT Day Avg',
+                "RT Day Avg",
                 price_metric_value(
                     benchmark_average
                 )
             )
 
             b6.metric(
-                'DAM Day Avg',
+                "DAM Day Avg",
                 price_metric_value(
                     benchmark_dam_average
                 )
             )
 
             st.caption(
-                f'Today at {benchmark_hub}: '
-                f'high '
-                f'**{price_metric_value(benchmark_high)}**, '
-                f'low '
-                f'**{price_metric_value(benchmark_low)}**. '
-                'This broad benchmark is intentionally '
-                'not included in the automated '
-                'Opportunity Score yet.'
+                f"Today at {benchmark_hub}: "
+                f"high "
+                f"**{price_metric_value(benchmark_high)}**, "
+                f"low "
+                f"**{price_metric_value(benchmark_low)}**. "
+                "This broad benchmark is intentionally "
+                "not included in the automated "
+                "Opportunity Score yet."
             )
 
             project_market_chart = (
                 project_rt[
                     [
-                        'Timestamp',
+                        "Timestamp",
                         benchmark_hub
                     ]
                 ]
                 .rename(
                     columns={
                         benchmark_hub:
-                            f'{benchmark_hub} RT SPP'
+                            f"{benchmark_hub} RT SPP"
                     }
                 )
             )
 
             st.line_chart(
                 project_market_chart.set_index(
-                    'Timestamp'
+                    "Timestamp"
                 ),
                 use_container_width=True,
                 height=320
