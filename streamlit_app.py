@@ -1,4 +1,6 @@
 import html as html_lib
+import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -435,6 +437,186 @@ def price_metric_value(value):
     if pd.isna(value):
         return 'N/A'
     return f'${value:,.2f}/MWh'
+ERCOT_PUBLIC_API_BASE = 'https://api.ercot.com/api/public-reports'
+ERCOT_PUBLIC_API_AUTH_URL = 'https://ercotb2c.b2clogin.com/ercotb2c.onmicrosoft.com/B2C_1_PUBAPI-ROPC-FLOW/oauth2/v2.0/token'
+ERCOT_PUBLIC_API_CLIENT_ID = 'fec253ea-0d06-4272-a5e6-b478baeecd70'
+ERCOT_PUBLIC_API_SCOPE = 'openid ' + ERCOT_PUBLIC_API_CLIENT_ID + ' offline_access'
+ERCOT_RT_NODAL_ENDPOINT = '/np6-788-cd/lmp_node_zone_hub'
+ERCOT_RTD_NODAL_ENDPOINT = '/np6-970-cd/rtd_lmp_node_zone_hub'
+ERCOT_DAM_NODAL_ENDPOINT = '/np4-190-cd/dam_stlmnt_pnt_prices'
+
+def _get_ercot_api_config():
+    """Read ERCOT API credentials without exposing them in the UI."""
+    username = clean_text(os.getenv('ERCOT_API_USERNAME', ''))
+    password = clean_text(os.getenv('ERCOT_API_PASSWORD', ''))
+    subscription_key = clean_text(os.getenv('ERCOT_API_SUBSCRIPTION_KEY', ''))
+    try:
+        secret_block = st.secrets.get('ercot_api', {})
+        username = clean_text(secret_block.get('username', username))
+        password = clean_text(secret_block.get('password', password))
+        subscription_key = clean_text(secret_block.get('subscription_key', subscription_key))
+    except Exception:
+        pass
+    return {'username': username, 'password': password, 'subscription_key': subscription_key, 'configured': bool(username and password and subscription_key)}
+
+def _ercot_api_authenticate(username, password):
+    """Authenticate against ERCOT's documented Public API ROPC flow."""
+    form_data = urllib.parse.urlencode({'username': username, 'password': password, 'grant_type': 'password', 'scope': ERCOT_PUBLIC_API_SCOPE, 'client_id': ERCOT_PUBLIC_API_CLIENT_ID, 'response_type': 'id_token'}).encode('utf-8')
+    request = urllib.request.Request(ERCOT_PUBLIC_API_AUTH_URL, data=form_data, headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 ERCOT-Acquisition-Dashboard/1.0'}, method='POST')
+    with urllib.request.urlopen(request, timeout=25) as response:
+        payload = json.loads(response.read().decode('utf-8', errors='replace'))
+    token = payload.get('id_token') or payload.get('access_token')
+    if not token:
+        raise ValueError('ERCOT authentication succeeded but no usable token was returned.')
+    return token
+
+def _ercot_api_get(endpoint, params, token, subscription_key):
+    cleaned_params = {key: value for key, value in params.items() if value not in [None, '']}
+    url = ERCOT_PUBLIC_API_BASE + endpoint
+    if cleaned_params:
+        url += '?' + urllib.parse.urlencode(cleaned_params)
+    request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + token, 'Ocp-Apim-Subscription-Key': subscription_key, 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 ERCOT-Acquisition-Dashboard/1.0'})
+    with urllib.request.urlopen(request, timeout=35) as response:
+        return json.loads(response.read().decode('utf-8', errors='replace'))
+
+def _ercot_report_to_dataframe(payload):
+    """Normalize ERCOT Public API report payloads into a DataFrame."""
+    if not isinstance(payload, dict):
+        return pd.DataFrame()
+    data = payload.get('data', [])
+    fields = payload.get('fields', [])
+    field_names = [clean_text(field.get('name')) for field in fields if isinstance(field, dict) and clean_text(field.get('name'))]
+    if isinstance(data, list):
+        if not data:
+            return pd.DataFrame(columns=field_names)
+        if isinstance(data[0], dict):
+            return pd.DataFrame(data)
+        if field_names:
+            width = min(len(field_names), max((len(row) if isinstance(row, (list, tuple)) else 1 for row in data)))
+            rows = []
+            for row in data:
+                if isinstance(row, (list, tuple)):
+                    values = list(row)[:width]
+                else:
+                    values = [row]
+                if len(values) < width:
+                    values += [None] * (width - len(values))
+                rows.append(values)
+            return pd.DataFrame(rows, columns=field_names[:width])
+        return pd.DataFrame(data)
+    if isinstance(data, dict):
+        try:
+            return pd.DataFrame(data)
+        except Exception:
+            return pd.DataFrame([data])
+    return pd.DataFrame()
+
+def _canonical_column_name(value):
+    return re.sub('[^a-z0-9]', '', clean_text(value).lower())
+
+def _find_dataframe_column(frame, candidates):
+    if frame is None:
+        return None
+    lookup = {_canonical_column_name(column): column for column in frame.columns}
+    for candidate in candidates:
+        key = _canonical_column_name(candidate)
+        if key in lookup:
+            return lookup[key]
+    return None
+
+def _ercot_timestamp_string(timestamp):
+    value = pd.Timestamp(timestamp)
+    if value.tzinfo is not None:
+        value = value.tz_convert('America/Chicago').tz_localize(None)
+    return value.strftime('%Y-%m-%dT%H:%M:%S')
+
+def _fetch_ercot_nodal_actual(settlement_point, token, subscription_key, lookback_hours=3):
+    now_central = pd.Timestamp.now(tz='America/Chicago')
+    payload = _ercot_api_get(ERCOT_RT_NODAL_ENDPOINT, {'SCEDTimestampFrom': _ercot_timestamp_string(now_central - pd.Timedelta(hours=lookback_hours)), 'SCEDTimestampTo': _ercot_timestamp_string(now_central + pd.Timedelta(minutes=10)), 'settlementPoint': settlement_point, 'size': 1000}, token, subscription_key)
+    frame = _ercot_report_to_dataframe(payload)
+    timestamp_col = _find_dataframe_column(frame, ['SCEDTimestamp', 'SCED Timestamp'])
+    lmp_col = _find_dataframe_column(frame, ['LMP'])
+    point_col = _find_dataframe_column(frame, ['settlementPoint', 'Settlement Point'])
+    if timestamp_col:
+        frame['Nodal Timestamp'] = pd.to_datetime(frame[timestamp_col], errors='coerce')
+    if lmp_col:
+        frame['Nodal LMP'] = pd.to_numeric(frame[lmp_col], errors='coerce')
+    if point_col:
+        frame['Settlement Point'] = frame[point_col].astype(str)
+    if 'Nodal Timestamp' in frame.columns:
+        frame = frame.sort_values('Nodal Timestamp').reset_index(drop=True)
+    return frame
+
+def _fetch_ercot_rtd_nodal_forecast(settlement_point, token, subscription_key, lookback_minutes=30):
+    now_central = pd.Timestamp.now(tz='America/Chicago')
+    payload = _ercot_api_get(ERCOT_RTD_NODAL_ENDPOINT, {'RTDTimestampFrom': _ercot_timestamp_string(now_central - pd.Timedelta(minutes=lookback_minutes)), 'RTDTimestampTo': _ercot_timestamp_string(now_central + pd.Timedelta(minutes=5)), 'settlementPoint': settlement_point, 'size': 2000}, token, subscription_key)
+    frame = _ercot_report_to_dataframe(payload)
+    rtd_col = _find_dataframe_column(frame, ['RTDTimestamp', 'RTD Timestamp'])
+    interval_col = _find_dataframe_column(frame, ['intervalEnding', 'Interval Ending'])
+    interval_id_col = _find_dataframe_column(frame, ['intervalId', 'Interval ID'])
+    lmp_col = _find_dataframe_column(frame, ['LMP'])
+    point_col = _find_dataframe_column(frame, ['settlementPoint', 'Settlement Point'])
+    point_type_col = _find_dataframe_column(frame, ['settlementPointType', 'Settlement Point Type'])
+    if rtd_col:
+        frame['RTD Timestamp'] = pd.to_datetime(frame[rtd_col], errors='coerce')
+    if interval_col:
+        frame['Forecast Interval'] = pd.to_datetime(frame[interval_col], errors='coerce')
+    if interval_id_col:
+        frame['Forecast Interval ID'] = pd.to_numeric(frame[interval_id_col], errors='coerce')
+    if lmp_col:
+        frame['Forecast LMP'] = pd.to_numeric(frame[lmp_col], errors='coerce')
+    if point_col:
+        frame['Settlement Point'] = frame[point_col].astype(str)
+    if point_type_col:
+        frame['Settlement Point Type'] = frame[point_type_col].astype(str)
+    if 'RTD Timestamp' in frame.columns and frame['RTD Timestamp'].notna().any():
+        latest_rtd = frame['RTD Timestamp'].max()
+        frame = frame[frame['RTD Timestamp'] == latest_rtd].copy()
+    sort_columns = [column for column in ['Forecast Interval', 'Forecast Interval ID'] if column in frame.columns]
+    if sort_columns:
+        frame = frame.sort_values(sort_columns).reset_index(drop=True)
+    return frame
+
+def _fetch_ercot_dam_nodal(settlement_point, token, subscription_key):
+    today_central = pd.Timestamp.now(tz='America/Chicago').date()
+    end_date = (pd.Timestamp(today_central) + pd.Timedelta(days=2)).date()
+    payload = _ercot_api_get(ERCOT_DAM_NODAL_ENDPOINT, {'deliveryDateFrom': today_central.isoformat(), 'deliveryDateTo': end_date.isoformat(), 'settlementPoint': settlement_point, 'size': 500}, token, subscription_key)
+    frame = _ercot_report_to_dataframe(payload)
+    date_col = _find_dataframe_column(frame, ['deliveryDate', 'Delivery Date'])
+    he_col = _find_dataframe_column(frame, ['hourEnding', 'Hour Ending'])
+    price_col = _find_dataframe_column(frame, ['settlementPointPrice', 'Settlement Point Price'])
+    point_col = _find_dataframe_column(frame, ['settlementPoint', 'Settlement Point'])
+    if date_col:
+        frame['Delivery Date'] = pd.to_datetime(frame[date_col], errors='coerce')
+    if he_col:
+        frame['Hour Ending'] = frame[he_col].astype(str)
+        frame['Hour Ending Sort'] = pd.to_numeric(frame['Hour Ending'].str.extract('(\\d+)')[0], errors='coerce')
+    if price_col:
+        frame['DAM SPP'] = pd.to_numeric(frame[price_col], errors='coerce')
+    if point_col:
+        frame['Settlement Point'] = frame[point_col].astype(str)
+    if 'Delivery Date' in frame.columns and frame['Delivery Date'].notna().any():
+        latest_delivery = frame['Delivery Date'].max()
+        frame = frame[frame['Delivery Date'] == latest_delivery].copy()
+    sort_columns = [column for column in ['Delivery Date', 'Hour Ending Sort'] if column in frame.columns]
+    if sort_columns:
+        frame = frame.sort_values(sort_columns).reset_index(drop=True)
+    return frame
+
+def _detect_project_node_column(frame):
+    candidates = ['ERCOT Resource Node', 'Resource Node', 'ERCOT Settlement Point', 'Settlement Point', 'Settlement Point Name', 'Pricing Node']
+    return _find_dataframe_column(frame, candidates)
+
+def _parse_forward_curve_upload(uploaded_file):
+    if uploaded_file is None:
+        return (pd.DataFrame(), {})
+    frame = pd.read_csv(uploaded_file)
+    node_col = _find_dataframe_column(frame, ['Settlement Point', 'Resource Node', 'Node', 'ERCOT Resource Node', 'ERCOT Settlement Point'])
+    date_col = _find_dataframe_column(frame, ['Date', 'Datetime', 'Timestamp', 'Month', 'Period'])
+    year_col = _find_dataframe_column(frame, ['Year'])
+    price_col = _find_dataframe_column(frame, ['Price ($/MWh)', 'Forecast Price ($/MWh)', 'Forecast Price', 'Nodal Price', 'Price', 'LMP'])
+    scenario_col = _find_dataframe_column(frame, ['Scenario', 'Case'])
+    return (frame, {'node': node_col, 'date': date_col, 'year': year_col, 'price': price_col, 'scenario': scenario_col})
 market_lmp_df = pd.DataFrame()
 market_rt_df = pd.DataFrame()
 market_dam_df = pd.DataFrame()
@@ -634,7 +816,7 @@ with dashboard_tab:
         st.success(f'Example Opportunity Score = {example_final:.1f}')
     with guide_right:
         st.markdown('### 🧭 How to Use')
-        st.markdown('\n            **1. Management Shortlist** — Top 5 priorities  \n            **2. Top Acquisition Targets** — Top 20 overall  \n            **3. By Technology** — Solar, Storage or Wind  \n            **4. ERCOT Area** — Compare market location  \n            **5. Bundles** — Multiple 50–60 MW assets by owner  \n            **6. Score Breakdown** — Drill into a project  \n            **7. Map Explorer** — View all mapped projects, filter the universe, and drill into a selected project  \n            **8. ERCOT Competitor Due Diligence** — Screen Project Orbit competitors in ERCOT South, map them, and download the list  \n            **9. ERCOT Market Prices** — Monitor live RT SPP, DAM prices, ancillary-service clearing prices, and project-area benchmarks\n            ')
+        st.markdown('\n            **1. Management Shortlist** — Top 5 priorities  \n            **2. Top Acquisition Targets** — Top 20 overall  \n            **3. By Technology** — Solar, Storage or Wind  \n            **4. ERCOT Area** — Compare market location  \n            **5. Bundles** — Multiple 50–60 MW assets by owner  \n            **6. Score Breakdown** — Drill into a project  \n            **7. Map Explorer** — View all mapped projects, filter the universe, and drill into a selected project  \n            **8. ERCOT Competitor Due Diligence** — Screen Project Orbit competitors in ERCOT South, compare filtered queue placement, view nodal actual / RTD / DAM prices, map projects, and download the list  \n            **9. ERCOT Market Prices** — Monitor live RT SPP, DAM prices, ancillary-service clearing prices, and project-area benchmarks\n            ')
         st.markdown('### 🚦 Score Guide')
         st.markdown('\n            **80+** → Contact / Diligence  \n            **70–79** → Investigate  \n            **60–69** → Monitor  \n            **<60** → Low Priority\n            ')
         st.markdown('### 🗺️ Location Logic')
@@ -1309,6 +1491,207 @@ with competitor_tab:
         st.dataframe(queue_table, use_container_width=True, hide_index=True, column_config={'Filtered Queue Placement': st.column_config.NumberColumn('Queue Placement', format='#%d'), 'Capacity (MW)': st.column_config.NumberColumn('Capacity (MW)', format='%.0f'), 'Queue Date': st.column_config.DateColumn('Queue Date'), 'COD': st.column_config.DateColumn('COD')})
         with st.expander('How filtered queue placement is calculated', expanded=False):
             st.markdown('**Ranking order:** Operating / Complete → In Construction → IA Executed → FIS Completed → FIS Started → Studies Undergoing / Other → Pre-Study → Other / Unknown → Inactive / Suspended / Retired. Within the same stage, earlier Queue Date ranks first, then earlier Queue Cycle, then earlier COD. Orbit is always added as a reference when a matching Orbit / Gunsight row exists.')
+        st.divider()
+        st.markdown('### ⚡ Nodal Market Diligence & Forecast')
+        st.caption("Uses ERCOT's public nodal products when Public Data API credentials are configured: NP6-788-CD for recent SCED nodal LMPs, NP6-970-CD for Look-Ahead RTD indicative LMPs, and NP4-190-CD for Day-Ahead Settlement Point Prices. RTD is the official short-horizon indicative price outlook; DAM is a market-cleared next-day benchmark. Neither is a long-term merchant forward curve.")
+        nodal_project_rows = []
+        if orbit_reference is not None:
+            orbit_row_dict = orbit_reference.to_dict()
+            orbit_row_dict['Nodal Reference Type'] = 'Project Orbit'
+            nodal_project_rows.append(orbit_row_dict)
+        for _, competitor_row in competitor_view.iterrows():
+            competitor_dict = competitor_row.to_dict()
+            competitor_dict['Nodal Reference Type'] = 'Competitor'
+            nodal_project_rows.append(competitor_dict)
+        nodal_project_frame = pd.DataFrame(nodal_project_rows)
+        if nodal_project_frame.empty:
+            st.info('No Orbit reference or filtered competitor project is available for nodal diligence under the current filters.')
+        else:
+            nodal_project_frame['Nodal Project Label'] = nodal_project_frame.apply(lambda row: f"{clean_text(row.get('Nodal Reference Type'))} — {clean_text(row.get('Power Project Name'))} — {clean_text(row.get('Owner')) or 'Unknown Owner'} — {row.get('Capacity (MW)', np.nan):,.0f} MW", axis=1)
+            nodal_project_label = st.selectbox('Project for nodal pricing', options=nodal_project_frame['Nodal Project Label'].tolist(), index=0, key='orbit_nodal_project_selector')
+            nodal_project = nodal_project_frame[nodal_project_frame['Nodal Project Label'] == nodal_project_label].iloc[0]
+            detected_node_column = _detect_project_node_column(nodal_project_frame)
+            detected_node = ''
+            if detected_node_column:
+                detected_node = clean_text(nodal_project.get(detected_node_column))
+            project_area_for_node = clean_text(nodal_project.get('ERCOT Area'))
+            area_hub_map = {'ERCOT-N': 'HB_NORTH', 'ERCOT-H': 'HB_HOUSTON', 'ERCOT-S': 'HB_SOUTH', 'ERCOT-W': 'HB_WEST', 'Panhandle': 'HB_PAN'}
+            nodal_benchmark_hub = area_hub_map.get(project_area_for_node, 'HB_SOUTH')
+            node_input_col, hub_display_col = st.columns([2.2, 1])
+            selected_nodal_row_position = int(nodal_project_frame.index[nodal_project_frame['Nodal Project Label'] == nodal_project_label][0])
+            with node_input_col:
+                selected_resource_node = st.text_input('ERCOT Resource Node / Settlement Point', value=detected_node, key='orbit_nodal_resource_node_' + str(selected_nodal_row_position), placeholder='Example: enter the exact ERCOT Resource Node / Settlement Point', help='If the Orennia export contains a Resource Node or Settlement Point column it is filled automatically. Otherwise enter the exact ERCOT settlement point manually. A POI name is not automatically treated as a Resource Node.').strip()
+            with hub_display_col:
+                st.metric('Hub Benchmark', nodal_benchmark_hub)
+            nodal_api_config = _get_ercot_api_config()
+            if detected_node_column:
+                st.caption(f'Detected project nodal field: **{detected_node_column}**. You can override it in the input above.')
+            else:
+                st.caption('No explicit Resource Node / Settlement Point field was found in the current Orennia export, so the node must be entered manually. The app does not guess a settlement node from the POI.')
+            api_status_col, refresh_nodal_col = st.columns([3, 1])
+            with api_status_col:
+                if nodal_api_config['configured']:
+                    st.success('ERCOT Public Data API credentials are configured.')
+                else:
+                    st.warning('ERCOT Public Data API credentials are not configured. Live nodal actuals, RTD forecast and DAM nodal prices will remain unavailable until credentials are added.')
+            with refresh_nodal_col:
+                refresh_nodal_data = st.button('🔄 Refresh Nodal Data', key='refresh_orbit_nodal_data')
+            if refresh_nodal_data:
+                st.rerun()
+            if not nodal_api_config['configured']:
+                with st.expander('ERCOT API setup', expanded=False):
+                    st.code('[ercot_api]\nusername = "your@email.com"\npassword = "your_password"\nsubscription_key = "your_subscription_key"', language='toml')
+                    st.caption('Add this to Streamlit Secrets after registering for the ERCOT Public Data API. Credentials are read from secrets and are not displayed in the dashboard.')
+            nodal_actual = pd.DataFrame()
+            hub_actual = pd.DataFrame()
+            nodal_rtd = pd.DataFrame()
+            hub_rtd = pd.DataFrame()
+            nodal_dam = pd.DataFrame()
+            hub_dam = pd.DataFrame()
+            nodal_api_error = ''
+            if selected_resource_node and nodal_api_config['configured']:
+                try:
+                    with st.spinner('Loading ERCOT nodal actual and forecast data...'):
+                        nodal_token = _ercot_api_authenticate(nodal_api_config['username'], nodal_api_config['password'])
+                        nodal_actual = _fetch_ercot_nodal_actual(selected_resource_node, nodal_token, nodal_api_config['subscription_key'])
+                        hub_actual = _fetch_ercot_nodal_actual(nodal_benchmark_hub, nodal_token, nodal_api_config['subscription_key'])
+                        nodal_rtd = _fetch_ercot_rtd_nodal_forecast(selected_resource_node, nodal_token, nodal_api_config['subscription_key'])
+                        hub_rtd = _fetch_ercot_rtd_nodal_forecast(nodal_benchmark_hub, nodal_token, nodal_api_config['subscription_key'])
+                        nodal_dam = _fetch_ercot_dam_nodal(selected_resource_node, nodal_token, nodal_api_config['subscription_key'])
+                        hub_dam = _fetch_ercot_dam_nodal(nodal_benchmark_hub, nodal_token, nodal_api_config['subscription_key'])
+                except Exception as exc:
+                    nodal_api_error = clean_text(exc)
+                    st.error('ERCOT nodal API request failed. ' + nodal_api_error)
+            elif not selected_resource_node:
+                st.info('Enter the exact ERCOT Resource Node / Settlement Point to load nodal actual and forecast data.')
+            latest_node_lmp = np.nan
+            latest_hub_lmp = np.nan
+            latest_rt_basis = np.nan
+            rtd_terminal_price = np.nan
+            rtd_average_price = np.nan
+            dam_average_price = np.nan
+            dam_peak_price = np.nan
+            dam_delivery_date = pd.NaT
+            if not nodal_actual.empty and 'Nodal LMP' in nodal_actual.columns:
+                valid_node_actual = nodal_actual[nodal_actual['Nodal LMP'].notna()]
+                if not valid_node_actual.empty:
+                    latest_node_lmp = valid_node_actual['Nodal LMP'].iloc[-1]
+            if not hub_actual.empty and 'Nodal LMP' in hub_actual.columns:
+                valid_hub_actual = hub_actual[hub_actual['Nodal LMP'].notna()]
+                if not valid_hub_actual.empty:
+                    latest_hub_lmp = valid_hub_actual['Nodal LMP'].iloc[-1]
+            if pd.notna(latest_node_lmp) and pd.notna(latest_hub_lmp):
+                latest_rt_basis = latest_node_lmp - latest_hub_lmp
+            if not nodal_rtd.empty and 'Forecast LMP' in nodal_rtd.columns:
+                valid_rtd = nodal_rtd[nodal_rtd['Forecast LMP'].notna()]
+                if not valid_rtd.empty:
+                    rtd_terminal_price = valid_rtd['Forecast LMP'].iloc[-1]
+                    rtd_average_price = valid_rtd['Forecast LMP'].mean()
+            if not nodal_dam.empty and 'DAM SPP' in nodal_dam.columns:
+                valid_dam = nodal_dam[nodal_dam['DAM SPP'].notna()]
+                if not valid_dam.empty:
+                    dam_average_price = valid_dam['DAM SPP'].mean()
+                    dam_peak_price = valid_dam['DAM SPP'].max()
+                    if 'Delivery Date' in valid_dam.columns:
+                        dam_delivery_date = valid_dam['Delivery Date'].max()
+            nm1, nm2, nm3, nm4, nm5, nm6 = st.columns(6)
+            nm1.metric('RT Nodal LMP', price_metric_value(latest_node_lmp))
+            nm2.metric(f'{nodal_benchmark_hub} RT', price_metric_value(latest_hub_lmp))
+            nm3.metric('RT Nodal Basis', f'${latest_rt_basis:+,.2f}/MWh' if pd.notna(latest_rt_basis) else 'N/A')
+            nm4.metric('RTD End-of-Horizon', price_metric_value(rtd_terminal_price))
+            nm5.metric('RTD Avg Forecast', price_metric_value(rtd_average_price))
+            dam_metric_label = 'DAM Avg'
+            if pd.notna(dam_delivery_date):
+                dam_metric_label = 'DAM Avg ' + pd.Timestamp(dam_delivery_date).strftime('%m/%d')
+            nm6.metric(dam_metric_label, price_metric_value(dam_average_price))
+            if not nodal_actual.empty and (not hub_actual.empty) and ('Nodal Timestamp' in nodal_actual.columns) and ('Nodal Timestamp' in hub_actual.columns) and ('Nodal LMP' in nodal_actual.columns) and ('Nodal LMP' in hub_actual.columns):
+                node_actual_chart = nodal_actual[['Nodal Timestamp', 'Nodal LMP']].dropna(subset=['Nodal Timestamp']).rename(columns={'Nodal LMP': selected_resource_node})
+                hub_actual_chart = hub_actual[['Nodal Timestamp', 'Nodal LMP']].dropna(subset=['Nodal Timestamp']).rename(columns={'Nodal LMP': nodal_benchmark_hub})
+                actual_chart = pd.merge_asof(node_actual_chart.sort_values('Nodal Timestamp'), hub_actual_chart.sort_values('Nodal Timestamp'), on='Nodal Timestamp', direction='nearest', tolerance=pd.Timedelta(minutes=3))
+                actual_chart['Basis ($/MWh)'] = actual_chart[selected_resource_node] - actual_chart[nodal_benchmark_hub]
+                chart_left, basis_right = st.columns(2)
+                with chart_left:
+                    st.markdown('#### Recent SCED Nodal vs Hub LMP')
+                    st.line_chart(actual_chart.set_index('Nodal Timestamp')[[selected_resource_node, nodal_benchmark_hub]], use_container_width=True, height=320)
+                with basis_right:
+                    st.markdown('#### Recent Nodal Basis')
+                    st.line_chart(actual_chart.set_index('Nodal Timestamp')[['Basis ($/MWh)']], use_container_width=True, height=320)
+            if not nodal_rtd.empty and 'Forecast Interval' in nodal_rtd.columns and ('Forecast LMP' in nodal_rtd.columns):
+                rtd_chart = nodal_rtd[['Forecast Interval', 'Forecast LMP']].rename(columns={'Forecast LMP': selected_resource_node})
+                if not hub_rtd.empty and 'Forecast Interval' in hub_rtd.columns and ('Forecast LMP' in hub_rtd.columns):
+                    hub_rtd_chart = hub_rtd[['Forecast Interval', 'Forecast LMP']].rename(columns={'Forecast LMP': nodal_benchmark_hub})
+                    rtd_chart = rtd_chart.merge(hub_rtd_chart, on='Forecast Interval', how='left')
+                    rtd_chart['Forecast Basis ($/MWh)'] = rtd_chart[selected_resource_node] - rtd_chart[nodal_benchmark_hub]
+                st.markdown('#### ERCOT Look-Ahead RTD Indicative Nodal Forecast')
+                rtd_price_columns = [selected_resource_node]
+                if nodal_benchmark_hub in rtd_chart.columns:
+                    rtd_price_columns.append(nodal_benchmark_hub)
+                st.line_chart(rtd_chart.set_index('Forecast Interval')[rtd_price_columns], use_container_width=True, height=320)
+                if 'Forecast Basis ($/MWh)' in rtd_chart.columns:
+                    with st.expander('RTD forecast basis table', expanded=False):
+                        st.dataframe(rtd_chart, use_container_width=True, hide_index=True)
+            if not nodal_dam.empty and 'Hour Ending' in nodal_dam.columns and ('DAM SPP' in nodal_dam.columns):
+                dam_chart = nodal_dam[['Hour Ending', 'Hour Ending Sort', 'DAM SPP']].rename(columns={'DAM SPP': selected_resource_node})
+                if not hub_dam.empty and 'Hour Ending' in hub_dam.columns and ('DAM SPP' in hub_dam.columns):
+                    hub_dam_chart = hub_dam[['Hour Ending', 'DAM SPP']].rename(columns={'DAM SPP': nodal_benchmark_hub})
+                    dam_chart = dam_chart.merge(hub_dam_chart, on='Hour Ending', how='left')
+                    dam_chart['DAM Basis ($/MWh)'] = dam_chart[selected_resource_node] - dam_chart[nodal_benchmark_hub]
+                dam_chart = dam_chart.sort_values('Hour Ending Sort')
+                dam_title = '#### Day-Ahead Nodal Settlement Point Prices'
+                if pd.notna(dam_delivery_date):
+                    dam_title += ' — ' + pd.Timestamp(dam_delivery_date).strftime('%m/%d/%Y')
+                st.markdown(dam_title)
+                dam_price_columns = [selected_resource_node]
+                if nodal_benchmark_hub in dam_chart.columns:
+                    dam_price_columns.append(nodal_benchmark_hub)
+                st.line_chart(dam_chart.set_index('Hour Ending')[dam_price_columns], use_container_width=True, height=340)
+                if pd.notna(dam_peak_price):
+                    st.caption(f'Selected node DAM daily peak: **{price_metric_value(dam_peak_price)}**.')
+                if 'DAM Basis ($/MWh)' in dam_chart.columns:
+                    with st.expander('DAM nodal basis table', expanded=False):
+                        st.dataframe(dam_chart, use_container_width=True, hide_index=True)
+            st.markdown('#### Optional Long-Term Nodal Forward Curve')
+            st.caption("ERCOT's RTD and DAM products provide near-term forward-looking prices, not a multi-year nodal merchant forward curve. Upload a Wood Mackenzie, Orennia, Yes Energy or other approved nodal forecast CSV here if you want the same project screen to display a long-term forward curve.")
+            nodal_forward_upload = st.file_uploader('Optional nodal forward curve CSV', type=['csv'], key='orbit_nodal_forward_curve_upload')
+            if nodal_forward_upload is not None:
+                try:
+                    forward_curve, forward_columns = _parse_forward_curve_upload(nodal_forward_upload)
+                    if not forward_columns.get('price'):
+                        st.warning('Forward curve CSV needs a recognizable price column, for example Price ($/MWh), Forecast Price or Price.')
+                    else:
+                        forward_view = forward_curve.copy()
+                        forward_node_col = forward_columns.get('node')
+                        if forward_node_col and selected_resource_node:
+                            matching_forward = forward_view[forward_view[forward_node_col].astype(str).str.strip().str.upper() == selected_resource_node.upper()].copy()
+                            if matching_forward.empty:
+                                st.warning(f'The uploaded forward curve does not contain the selected node **{selected_resource_node}**.')
+                            else:
+                                forward_view = matching_forward
+                        scenario_col = forward_columns.get('scenario')
+                        if scenario_col:
+                            scenarios = sorted([clean_text(value) for value in forward_view[scenario_col].dropna().unique().tolist() if clean_text(value)])
+                            if scenarios:
+                                selected_forward_scenario = st.selectbox('Forward curve scenario', options=scenarios, key='orbit_nodal_forward_scenario')
+                                forward_view = forward_view[forward_view[scenario_col].astype(str) == selected_forward_scenario].copy()
+                        price_col = forward_columns['price']
+                        forward_view['Forecast Price ($/MWh)'] = pd.to_numeric(forward_view[price_col], errors='coerce')
+                        date_col = forward_columns.get('date')
+                        year_col = forward_columns.get('year')
+                        if date_col:
+                            forward_view['Forecast Period'] = pd.to_datetime(forward_view[date_col], errors='coerce')
+                        elif year_col:
+                            forward_view['Forecast Period'] = pd.to_datetime(forward_view[year_col].astype(str) + '-01-01', errors='coerce')
+                        else:
+                            forward_view['Forecast Period'] = np.arange(1, len(forward_view) + 1)
+                        forward_view = forward_view[forward_view['Forecast Price ($/MWh)'].notna()].copy()
+                        if forward_view.empty:
+                            st.warning('No numeric forecast prices remain after applying the current nodal forward-curve filters.')
+                        else:
+                            st.line_chart(forward_view.set_index('Forecast Period')[['Forecast Price ($/MWh)']], use_container_width=True, height=340)
+                            with st.expander('Long-term nodal forward curve data', expanded=False):
+                                st.dataframe(forward_view, use_container_width=True, hide_index=True)
+                except Exception as exc:
+                    st.error('Unable to read the nodal forward curve CSV. ' + clean_text(exc))
         if competitor_view.empty:
             st.warning('No competitors match the current tab filters.')
         else:
